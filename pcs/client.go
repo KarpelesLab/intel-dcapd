@@ -47,11 +47,28 @@ type Response struct {
 
 // doRequest performs an HTTP request with retry logic
 func (c *Client) doRequest(method, path string, query url.Values) (*Response, error) {
-	urlStr := c.baseURL + path
+	return c.doRequestWithVersion(method, path, "", query)
+}
+
+// doRequestWithVersion performs an HTTP request with version translation support
+func (c *Client) doRequestWithVersion(method, path, requestVersion string, query url.Values) (*Response, error) {
+	baseURL := c.baseURL
+
+	// Handle version translation: if PCS is configured for v4 but client requests v3
+	if requestVersion == "3" && c.pcsVersion == "4" {
+		baseURL = strings.Replace(baseURL, "/v4/", "/v3/", 1)
+	}
+
+	urlStr := baseURL + path
 	if len(query) > 0 {
 		urlStr += "?" + query.Encode()
 	}
 
+	return c.doRawRequest(method, urlStr)
+}
+
+// doRawRequest performs an HTTP request with a complete URL (used internally)
+func (c *Client) doRawRequest(method, urlStr string) (*Response, error) {
 	var lastErr error
 	maxRetries := 6
 
@@ -59,7 +76,7 @@ func (c *Client) doRequest(method, path string, query url.Values) (*Response, er
 		if retry > 0 {
 			// Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s
 			backoff := time.Duration(1<<uint(retry-1)) * time.Second
-			log.Printf("Retrying request to %s after %v (attempt %d/%d)", path, backoff, retry+1, maxRetries+1)
+			log.Printf("Retrying request to %s after %v (attempt %d/%d)", urlStr, backoff, retry+1, maxRetries+1)
 			time.Sleep(backoff)
 		}
 
@@ -135,25 +152,24 @@ func (c *Client) GetTCBInfo(prodType, fmspc, requestVersion, updateType string) 
 		query.Set("update", "standard")
 	}
 
-	// Start with base URL path
-	path := c.baseURL + "/tcb"
+	path := "/tcb"
 
-	// Handle TDX vs SGX
+	// For TDX, we need to use /tdx/ instead of /sgx/ in the base URL
+	// This is handled by replacing in a temporary baseURL
 	if prodType == "tdx" {
-		path = strings.Replace(path, "/sgx/", "/tdx/", 1)
+		// Use custom request with TDX URL
+		tdxBaseURL := strings.Replace(c.baseURL, "/sgx/", "/tdx/", 1)
+		if requestVersion == "3" && c.pcsVersion == "4" {
+			tdxBaseURL = strings.Replace(tdxBaseURL, "/v4/", "/v3/", 1)
+		}
+		urlStr := tdxBaseURL + path
+		if len(query) > 0 {
+			urlStr += "?" + query.Encode()
+		}
+		return c.doRawRequest("GET", urlStr)
 	}
 
-	// Handle version translation: if PCS is configured for v4 but client requests v3
-	if c.pcsVersion == "4" && requestVersion == "3" {
-		path = strings.Replace(path, "/v4/", "/v3/", 1)
-	}
-
-	// Extract just the path component (remove baseURL prefix)
-	if strings.HasPrefix(path, c.baseURL) {
-		path = strings.TrimPrefix(path, c.baseURL)
-	}
-
-	return c.doRequest("GET", path, query)
+	return c.doRequestWithVersion("GET", path, requestVersion, query)
 }
 
 // GetEnclaveIdentity retrieves enclave identity (QE, QVE, or TDQE)
@@ -165,30 +181,27 @@ func (c *Client) GetEnclaveIdentity(id, requestVersion, updateType string) (*Res
 		query.Set("update", "standard")
 	}
 
-	// Start with configured base URL
 	var path string
 	switch id {
 	case "1": // QE
-		path = c.baseURL + "/qe/identity"
+		path = "/qe/identity"
 	case "2": // QVE
-		path = c.baseURL + "/qve/identity"
-	case "3": // TDQE (TDX)
-		path = strings.Replace(c.baseURL, "/sgx/", "/tdx/", 1) + "/qe/identity"
+		path = "/qve/identity"
+	case "3": // TDQE (TDX) - needs /tdx/ instead of /sgx/
+		tdxBaseURL := strings.Replace(c.baseURL, "/sgx/", "/tdx/", 1)
+		if requestVersion == "3" && c.pcsVersion == "4" {
+			tdxBaseURL = strings.Replace(tdxBaseURL, "/v4/", "/v3/", 1)
+		}
+		urlStr := tdxBaseURL + "/qe/identity"
+		if len(query) > 0 {
+			urlStr += "?" + query.Encode()
+		}
+		return c.doRawRequest("GET", urlStr)
 	default:
 		return nil, fmt.Errorf("invalid enclave identity ID: %s", id)
 	}
 
-	// Handle version translation: if PCS is configured for v4 but client requests v3
-	if c.pcsVersion == "4" && requestVersion == "3" {
-		path = strings.Replace(path, "/v4/", "/v3/", 1)
-	}
-
-	// Extract just the path component (remove baseURL prefix)
-	if strings.HasPrefix(path, c.baseURL) {
-		path = strings.TrimPrefix(path, c.baseURL)
-	}
-
-	return c.doRequest("GET", path, query)
+	return c.doRequestWithVersion("GET", path, requestVersion, query)
 }
 
 // GetRootCACRL retrieves root CA CRL
