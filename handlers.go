@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/KarpelesLab/intel-dcapd/cache"
@@ -251,23 +252,36 @@ func fetchAndCachePlatform(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, enc
 		return err
 	}
 
-	// Store certificate chain
+	// Store certificate chain (URL-decode it first)
 	if issuerChain != "" {
+		decodedChain, err := url.QueryUnescape(issuerChain)
+		if err != nil {
+			log.Printf("Failed to decode issuer chain: %v", err)
+			decodedChain = issuerChain // Use as-is if decode fails
+		}
 		certChain := &cache.CertChain{
 			CA:        strings.ToLower(caType),
-			RootCert:  issuerChain,
+			RootCert:  decodedChain,
 			IntmdCert: "",
 		}
 		db.PutCertChain(strings.ToLower(caType), certChain)
 	}
 
-	// Store individual certificates from the response
+	// Store individual certificates from the response (URL-decode them first)
 	for _, certData := range certsArray {
 		// Skip "Not available" certificates
 		if certData.Cert == "Not available" {
 			continue
 		}
-		db.PutCert(qeID, pceID, certData.TCBM, []byte(certData.Cert))
+
+		// Decode URL-encoded certificate
+		decodedCert, err := url.QueryUnescape(certData.Cert)
+		if err != nil {
+			log.Printf("Failed to decode certificate: %v", err)
+			decodedCert = certData.Cert // Use as-is if decode fails
+		}
+
+		db.PutCert(qeID, pceID, certData.TCBM, []byte(decodedCert))
 	}
 
 	return nil
@@ -287,7 +301,9 @@ func writePCKCertResponse(w http.ResponseWriter, cert []byte, tcbm string, platf
 	w.Header().Set("SGX-FMSPC", platform.FMSPC)
 	w.Header().Set("SGX-PCK-Certificate-CA-Type", platform.CA)
 	if issuerChain != "" {
-		w.Header().Set("SGX-PCK-Certificate-Issuer-Chain", issuerChain)
+		// URL-encode the certificate chain for the HTTP header
+		encodedChain := url.QueryEscape(issuerChain)
+		w.Header().Set("SGX-PCK-Certificate-Issuer-Chain", encodedChain)
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(cert)
