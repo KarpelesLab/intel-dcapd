@@ -297,26 +297,18 @@ func parseSGXExtensions(extValue []byte) ([]byte, int, error) {
 		oidStr := oid.String()
 		logVerbose("  Found nested OID: %s (tag=%d, len=%d)", oidStr, value.Tag, len(value.Bytes))
 
-		// Check for CPUSVN (OID ends with .2.18)
-		if oidStr == "2.18" || strings.HasSuffix(oidStr, ".2.18") {
-			if value.Tag == asn1.TagOctetString && len(value.Bytes) >= 16 {
-				cpusvn = make([]byte, 16)
-				copy(cpusvn, value.Bytes[:16])
+		// Check for TCB extension (OID ends with .2) - it contains CPUSVN and PCESVN
+		if strings.HasSuffix(oidStr, ".2") && value.Tag == asn1.TagSequence {
+			logVerbose("  -> Found TCB sequence, parsing nested contents...")
+			cpusvnFound, pcesvnFound, err := parseTCBSequence(value.Bytes)
+			if err == nil {
+				cpusvn = cpusvnFound
+				pcesvn = pcesvnFound
 				foundCPUSVN = true
-				logVerbose("  -> CPUSVN found")
-			}
-		}
-
-		// Check for PCESVN (OID ends with .2.17)
-		if oidStr == "2.17" || strings.HasSuffix(oidStr, ".2.17") {
-			if value.Tag == asn1.TagInteger && len(value.Bytes) >= 1 {
-				// Parse integer (big-endian)
-				pcesvn = 0
-				for _, b := range value.Bytes {
-					pcesvn = (pcesvn << 8) | int(b)
-				}
 				foundPCESVN = true
-				logVerbose("  -> PCESVN found")
+				logVerbose("  -> Successfully extracted TCB values from nested sequence")
+			} else {
+				logVerbose("  -> Failed to parse TCB sequence: %v", err)
 			}
 		}
 	}
@@ -326,6 +318,78 @@ func parseSGXExtensions(extValue []byte) ([]byte, int, error) {
 	}
 	if !foundPCESVN {
 		return nil, 0, fmt.Errorf("PCESVN not found in SGX extensions")
+	}
+
+	return cpusvn, pcesvn, nil
+}
+
+// parseTCBSequence parses the TCB sequence to extract CPUSVN and PCESVN
+func parseTCBSequence(tcbBytes []byte) ([]byte, int, error) {
+	var cpusvn []byte
+	var pcesvn int
+	var foundCPUSVN, foundPCESVN bool
+
+	data := tcbBytes
+	for len(data) > 0 {
+		var item asn1.RawValue
+		var err error
+		data, err = asn1.Unmarshal(data, &item)
+		if err != nil {
+			logVerbose("    Warning: failed to unmarshal TCB item: %v", err)
+			break
+		}
+
+		if item.Class != asn1.ClassUniversal || item.Tag != asn1.TagSequence {
+			continue
+		}
+
+		// Parse [OID, value] pair
+		var oid asn1.ObjectIdentifier
+		var value asn1.RawValue
+		itemData := item.Bytes
+
+		itemData, err = asn1.Unmarshal(itemData, &oid)
+		if err != nil {
+			continue
+		}
+
+		_, err = asn1.Unmarshal(itemData, &value)
+		if err != nil {
+			continue
+		}
+
+		oidStr := oid.String()
+		logVerbose("    Found TCB component OID: %s (tag=%d, len=%d)", oidStr, value.Tag, len(value.Bytes))
+
+		// Check for CPUSVN (OID .18 or ends with .2.18)
+		if oidStr == "18" || strings.HasSuffix(oidStr, ".18") {
+			if value.Tag == asn1.TagOctetString && len(value.Bytes) >= 16 {
+				cpusvn = make([]byte, 16)
+				copy(cpusvn, value.Bytes[:16])
+				foundCPUSVN = true
+				logVerbose("    -> CPUSVN found: %x", cpusvn)
+			}
+		}
+
+		// Check for PCESVN (OID .17 or ends with .2.17)
+		if oidStr == "17" || strings.HasSuffix(oidStr, ".17") {
+			if value.Tag == asn1.TagInteger && len(value.Bytes) >= 1 {
+				// Parse integer (big-endian)
+				pcesvn = 0
+				for _, b := range value.Bytes {
+					pcesvn = (pcesvn << 8) | int(b)
+				}
+				foundPCESVN = true
+				logVerbose("    -> PCESVN found: %d (0x%04x)", pcesvn, pcesvn)
+			}
+		}
+	}
+
+	if !foundCPUSVN {
+		return nil, 0, fmt.Errorf("CPUSVN not found in TCB sequence")
+	}
+	if !foundPCESVN {
+		return nil, 0, fmt.Errorf("PCESVN not found in TCB sequence")
 	}
 
 	return cpusvn, pcesvn, nil
