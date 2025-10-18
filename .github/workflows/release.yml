@@ -16,15 +16,19 @@ jobs:
           - goos: linux
             goarch: amd64
             name: intel-dcapd-linux-amd64
+            binary: intel-dcapd
           - goos: linux
             goarch: '386'
             name: intel-dcapd-linux-i386
+            binary: intel-dcapd
           - goos: windows
             goarch: amd64
-            name: intel-dcapd-windows-amd64.exe
+            name: intel-dcapd-windows-amd64
+            binary: intel-dcapd.exe
           - goos: windows
             goarch: '386'
-            name: intel-dcapd-windows-i386.exe
+            name: intel-dcapd-windows-i386
+            binary: intel-dcapd.exe
 
     steps:
       - name: Checkout code
@@ -41,13 +45,31 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          go build -ldflags="-s -w" -o ${{ matrix.name }}
+          go build -ldflags="-s -w" -o ${{ matrix.binary }}
+
+      - name: Package binary (Linux)
+        if: matrix.goos == 'linux'
+        run: |
+          mkdir -p dist/${{ matrix.name }}
+          cp ${{ matrix.binary }} dist/${{ matrix.name }}/
+          cp README.md LICENSE dist/${{ matrix.name }}/
+          cd dist
+          tar -czf ${{ matrix.name }}.tar.gz ${{ matrix.name }}
+
+      - name: Package binary (Windows)
+        if: matrix.goos == 'windows'
+        run: |
+          mkdir -p dist/${{ matrix.name }}
+          cp ${{ matrix.binary }} dist/${{ matrix.name }}/
+          cp README.md LICENSE dist/${{ matrix.name }}/
+          cd dist
+          zip -r ${{ matrix.name }}.zip ${{ matrix.name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: ${{ matrix.name }}
+          path: dist/${{ matrix.name }}.*
           retention-days: 1
 
   release:
@@ -72,10 +94,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/intel-dcapd-linux-amd64/intel-dcapd-linux-amd64
-            artifacts/intel-dcapd-linux-i386/intel-dcapd-linux-i386
-            artifacts/intel-dcapd-windows-amd64.exe/intel-dcapd-windows-amd64.exe
-            artifacts/intel-dcapd-windows-i386.exe/intel-dcapd-windows-i386.exe
+            artifacts/intel-dcapd-linux-amd64/intel-dcapd-linux-amd64.tar.gz
+            artifacts/intel-dcapd-linux-i386/intel-dcapd-linux-i386.tar.gz
+            artifacts/intel-dcapd-windows-amd64/intel-dcapd-windows-amd64.zip
+            artifacts/intel-dcapd-windows-i386/intel-dcapd-windows-i386.zip
           draft: false
           prerelease: false
           generate_release_notes: true
