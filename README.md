@@ -32,26 +32,26 @@ Download the latest release from [GitHub Releases](https://github.com/KarpelesLa
 
 **Linux (x86_64):**
 ```bash
-wget https://github.com/KarpelesLab/intel-dcapd/releases/latest/download/intel-dcapd-linux-amd64-VERSION.tar.gz
-tar -xzf intel-dcapd-linux-amd64-VERSION.tar.gz
-cd intel-dcapd-linux-amd64-VERSION
+wget https://github.com/KarpelesLab/intel-dcapd/releases/latest/download/intel-dcapd-linux-amd64.tar.gz
+tar -xzf intel-dcapd-linux-amd64.tar.gz
+cd intel-dcapd-linux-amd64-*/
 sudo cp intel-dcapd /usr/local/bin/
 sudo cp pccsadmin /usr/local/bin/
 ```
 
 **Linux (i386):**
 ```bash
-wget https://github.com/KarpelesLab/intel-dcapd/releases/latest/download/intel-dcapd-linux-i386-VERSION.tar.gz
-tar -xzf intel-dcapd-linux-i386-VERSION.tar.gz
-cd intel-dcapd-linux-i386-VERSION
+wget https://github.com/KarpelesLab/intel-dcapd/releases/latest/download/intel-dcapd-linux-i386.tar.gz
+tar -xzf intel-dcapd-linux-i386.tar.gz
+cd intel-dcapd-linux-i386-*/
 sudo cp intel-dcapd /usr/local/bin/
 sudo cp pccsadmin /usr/local/bin/
 ```
 
 **Windows (x86_64):**
 ```powershell
-# Download from: https://github.com/KarpelesLab/intel-dcapd/releases/latest
-# Extract intel-dcapd-windows-amd64-VERSION.zip
+# Download: https://github.com/KarpelesLab/intel-dcapd/releases/latest/download/intel-dcapd-windows-amd64.zip
+# Extract the zip file
 # Run intel-dcapd.exe and pccsadmin.exe from the extracted folder
 ```
 
