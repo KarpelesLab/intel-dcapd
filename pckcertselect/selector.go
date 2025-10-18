@@ -29,7 +29,7 @@ func logVerbose(format string, v ...interface{}) {
 // TCBInfo represents the TCB information from Intel PCS
 type TCBInfo struct {
 	TCBInfo struct {
-		Version    int `json:"version"`
+		Version    int    `json:"version"`
 		IssueDate  string `json:"issueDate"`
 		NextUpdate string `json:"nextUpdate"`
 		FMSPC      string `json:"fmspc"`
@@ -66,9 +66,9 @@ type comparisonResult int
 
 const (
 	compError          comparisonResult = iota // Error in comparison
-	compLower                                   // Left < Right
-	compEqualOrGreater                          // Left >= Right (all components)
-	compUndefined                               // Incomparable (some higher, some lower)
+	compLower                                  // Left < Right
+	compEqualOrGreater                         // Left >= Right (all components)
+	compUndefined                              // Incomparable (some higher, some lower)
 )
 
 // certWithTCB holds a certificate index and its extracted TCB
@@ -185,11 +185,11 @@ const (
 	SGXExtensionsOID = "1.2.840.113741.1.13.1"
 
 	// TCB extensions (nested under base)
-	SGXExtensionsPPID      = "1.2.840.113741.1.13.1.1"
-	SGXExtensionsTCB       = "1.2.840.113741.1.13.1.2"
-	SGXExtensionsPCEID     = "1.2.840.113741.1.13.1.3"
-	SGXExtensionsFMSPC     = "1.2.840.113741.1.13.1.4"
-	SGXExtensionsSGXType   = "1.2.840.113741.1.13.1.5"
+	SGXExtensionsPPID    = "1.2.840.113741.1.13.1.1"
+	SGXExtensionsTCB     = "1.2.840.113741.1.13.1.2"
+	SGXExtensionsPCEID   = "1.2.840.113741.1.13.1.3"
+	SGXExtensionsFMSPC   = "1.2.840.113741.1.13.1.4"
+	SGXExtensionsSGXType = "1.2.840.113741.1.13.1.5"
 
 	// Individual TCB components (nested under .2)
 	SGXExtensionsTCBComp01SVN = "1.2.840.113741.1.13.1.2.1"

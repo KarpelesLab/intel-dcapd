@@ -12,8 +12,8 @@ type Platform struct {
 
 // CertChain represents a certificate chain
 type CertChain struct {
-	CA       string `json:"ca"`
-	RootCert string `json:"root_cert"`
+	CA        string `json:"ca"`
+	RootCert  string `json:"root_cert"`
 	IntmdCert string `json:"intmd_cert,omitempty"`
 }
 

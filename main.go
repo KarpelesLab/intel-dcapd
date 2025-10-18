@@ -10,8 +10,8 @@ import (
 
 	"github.com/KarpelesLab/intel-dcapd/cache"
 	"github.com/KarpelesLab/intel-dcapd/maintenance"
-	"github.com/KarpelesLab/intel-dcapd/pcs"
 	"github.com/KarpelesLab/intel-dcapd/pckcertselect"
+	"github.com/KarpelesLab/intel-dcapd/pcs"
 )
 
 // Global verbose flag

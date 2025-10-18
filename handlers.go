@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/KarpelesLab/intel-dcapd/cache"
-	"github.com/KarpelesLab/intel-dcapd/pcs"
 	"github.com/KarpelesLab/intel-dcapd/pckcertselect"
+	"github.com/KarpelesLab/intel-dcapd/pcs"
 )
 
 // extractAPIVersion extracts the API version from the request path

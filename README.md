@@ -15,6 +15,7 @@ The original Node.js-based PCCS (`sgx-dcap-pccs`) has become difficult to instal
 - Deprecated npm packages that can no longer be installed
 - Complex dependency chains
 - Heavy runtime requirements (Node.js, native modules, etc.)
+- apt install requires interactions
 
 This Go implementation:
 - **Single binary** - no dependencies, just run it
