@@ -24,7 +24,7 @@ type TCBInfo struct {
 				SGXTCBComp02SVN int `json:"sgxtcbcomp02svn"`
 				SGXTCBComp03SVN int `json:"sgxtcbcomp03svn"`
 				SGXTCBComp04SVN int `json:"sgxtcbcomp04svn"`
-				SGXTCBComp05SVN int `json:"sgxtcbcomp06svn"`
+				SGXTCBComp05SVN int `json:"sgxtcbcomp05svn"`
 				SGXTCBComp06SVN int `json:"sgxtcbcomp06svn"`
 				SGXTCBComp07SVN int `json:"sgxtcbcomp07svn"`
 				SGXTCBComp08SVN int `json:"sgxtcbcomp08svn"`
