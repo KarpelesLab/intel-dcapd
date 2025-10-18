@@ -11,6 +11,7 @@ import (
 	"github.com/KarpelesLab/intel-dcapd/cache"
 	"github.com/KarpelesLab/intel-dcapd/maintenance"
 	"github.com/KarpelesLab/intel-dcapd/pcs"
+	"github.com/KarpelesLab/intel-dcapd/pckcertselect"
 )
 
 // Global verbose flag
@@ -39,6 +40,7 @@ func main() {
 	// Enable verbose logging if requested
 	if os.Getenv("DCAPD_VERBOSE") == "1" || os.Getenv("DCAPD_VERBOSE") == "true" {
 		verbose = true
+		pckcertselect.SetVerbose(true)
 		log.Printf("Verbose logging enabled")
 	}
 

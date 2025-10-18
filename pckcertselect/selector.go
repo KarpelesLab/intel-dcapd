@@ -6,8 +6,25 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"log"
 	"strconv"
+	"strings"
 )
+
+// Global verbose flag for this package
+var verbose bool
+
+// SetVerbose enables or disables verbose logging
+func SetVerbose(v bool) {
+	verbose = v
+}
+
+// logVerbose logs a message only if verbose mode is enabled
+func logVerbose(format string, v ...interface{}) {
+	if verbose {
+		log.Printf("[VERBOSE] "+format, v...)
+	}
+}
 
 // TCBInfo represents the TCB information from Intel PCS
 type TCBInfo struct {
@@ -111,37 +128,77 @@ func SelectCertificate(certs []string, cpuSVN, pceSVN, pceID string, tcbInfoJSON
 	return bestIdx, nil
 }
 
+// SGX extension OID constants
+const (
+	// Base SGX extensions OID
+	SGXExtensionsOID = "1.2.840.113741.1.13.1"
+
+	// TCB extensions (nested under base)
+	SGXExtensionsPPID      = "1.2.840.113741.1.13.1.1"
+	SGXExtensionsTCB       = "1.2.840.113741.1.13.1.2"
+	SGXExtensionsPCEID     = "1.2.840.113741.1.13.1.3"
+	SGXExtensionsFMSPC     = "1.2.840.113741.1.13.1.4"
+	SGXExtensionsSGXType   = "1.2.840.113741.1.13.1.5"
+
+	// Individual TCB components (nested under .2)
+	SGXExtensionsTCBComp01SVN = "1.2.840.113741.1.13.1.2.1"
+	SGXExtensionsTCBComp02SVN = "1.2.840.113741.1.13.1.2.2"
+	SGXExtensionsTCBComp03SVN = "1.2.840.113741.1.13.1.2.3"
+	SGXExtensionsTCBComp04SVN = "1.2.840.113741.1.13.1.2.4"
+	SGXExtensionsTCBComp05SVN = "1.2.840.113741.1.13.1.2.5"
+	SGXExtensionsTCBComp06SVN = "1.2.840.113741.1.13.1.2.6"
+	SGXExtensionsTCBComp07SVN = "1.2.840.113741.1.13.1.2.7"
+	SGXExtensionsTCBComp08SVN = "1.2.840.113741.1.13.1.2.8"
+	SGXExtensionsTCBComp09SVN = "1.2.840.113741.1.13.1.2.9"
+	SGXExtensionsTCBComp10SVN = "1.2.840.113741.1.13.1.2.10"
+	SGXExtensionsTCBComp11SVN = "1.2.840.113741.1.13.1.2.11"
+	SGXExtensionsTCBComp12SVN = "1.2.840.113741.1.13.1.2.12"
+	SGXExtensionsTCBComp13SVN = "1.2.840.113741.1.13.1.2.13"
+	SGXExtensionsTCBComp14SVN = "1.2.840.113741.1.13.1.2.14"
+	SGXExtensionsTCBComp15SVN = "1.2.840.113741.1.13.1.2.15"
+	SGXExtensionsTCBComp16SVN = "1.2.840.113741.1.13.1.2.16"
+	SGXExtensionsPCESVN       = "1.2.840.113741.1.13.1.2.17"
+	SGXExtensionsCPUSVN       = "1.2.840.113741.1.13.1.2.18"
+)
+
 // extractTCBFromCert extracts TCB components from a PCK certificate
 func extractTCBFromCert(cert *x509.Certificate) ([]byte, int, error) {
-	// SGX PCK certificates have TCB in extensions
-	// OID 1.2.840.113741.1.13.1.2.18 contains CPUSVN (16 bytes)
-	// OID 1.2.840.113741.1.13.1.2.17 contains PCESVN (2 bytes)
-
 	var cpusvn []byte
 	var pcesvn int
+	var foundCPUSVN, foundPCESVN bool
 
+	// Debug: log all SGX extension OIDs present
+	logVerbose("Certificate has %d extensions total", len(cert.Extensions))
 	for _, ext := range cert.Extensions {
 		oidStr := ext.Id.String()
+		if strings.HasPrefix(oidStr, SGXExtensionsOID) {
+			logVerbose("  Found SGX extension: OID=%s len=%d", oidStr, len(ext.Value))
+		}
 
-		// CPUSVN extension (OID .2.18)
-		if oidStr == "1.2.840.113741.1.13.1.2.18" {
-			// CPUSVN is 16 bytes
+		// CPUSVN extension
+		if oidStr == SGXExtensionsCPUSVN {
 			if len(ext.Value) >= 16 {
-				// Last 16 bytes are the CPUSVN value
 				cpusvn = ext.Value[len(ext.Value)-16:]
+				foundCPUSVN = true
+				logVerbose("  Extracted CPUSVN: %x", cpusvn)
 			}
 		}
-		// PCESVN extension (OID .2.17)
-		if oidStr == "1.2.840.113741.1.13.1.2.17" {
+		// PCESVN extension
+		if oidStr == SGXExtensionsPCESVN {
 			if len(ext.Value) >= 2 {
-				// Parse as 2-byte integer (little endian based on Intel spec)
+				// Parse as 2-byte integer (little endian)
 				pcesvn = int(ext.Value[len(ext.Value)-1])<<8 | int(ext.Value[len(ext.Value)-2])
+				foundPCESVN = true
+				logVerbose("  Extracted PCESVN: %d (0x%04x)", pcesvn, pcesvn)
 			}
 		}
 	}
 
-	if cpusvn == nil {
-		return nil, 0, fmt.Errorf("CPUSVN not found in certificate (OID 1.2.840.113741.1.13.1.2.18)")
+	if !foundCPUSVN {
+		return nil, 0, fmt.Errorf("CPUSVN not found in certificate (looked for OID %s)", SGXExtensionsCPUSVN)
+	}
+	if !foundPCESVN {
+		return nil, 0, fmt.Errorf("PCESVN not found in certificate (looked for OID %s)", SGXExtensionsPCESVN)
 	}
 
 	return cpusvn, pcesvn, nil
