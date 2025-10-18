@@ -1,6 +1,6 @@
 # Intel DCAP Provisioning Certificate Caching Service (Go)
 
-> **⚠️ IMPORTANT NOTICE**
+> **IMPORTANT NOTICE**
 > This is **NOT** official Intel software. This is an independent, community-developed implementation of a caching proxy for Intel's SGX Provisioning Certificate Service. It is not affiliated with, endorsed by, or supported by Intel Corporation.
 >
 > Use at your own risk. For official Intel software, please visit the [Intel SGX DCAP repository](https://github.com/intel/SGXDataCenterAttestationPrimitives).
@@ -23,6 +23,54 @@ This Go implementation:
 - **Minimal configuration** - only requires an API key
 - **Lightweight** - uses PebbleDB for caching instead of SQL
 - **Drop-in compatible** - implements the same API as the original PCCS
+
+## Installation
+
+### Pre-built Binaries (Recommended)
+
+Download the latest release from [GitHub Releases](https://github.com/KarpelesLab/intel-dcapd/releases):
+
+**Linux (x86_64):**
+```bash
+wget https://github.com/KarpelesLab/intel-dcapd/releases/latest/download/intel-dcapd-linux-amd64-VERSION.tar.gz
+tar -xzf intel-dcapd-linux-amd64-VERSION.tar.gz
+cd intel-dcapd-linux-amd64-VERSION
+sudo cp intel-dcapd /usr/local/bin/
+sudo cp pccsadmin /usr/local/bin/
+```
+
+**Linux (i386):**
+```bash
+wget https://github.com/KarpelesLab/intel-dcapd/releases/latest/download/intel-dcapd-linux-i386-VERSION.tar.gz
+tar -xzf intel-dcapd-linux-i386-VERSION.tar.gz
+cd intel-dcapd-linux-i386-VERSION
+sudo cp intel-dcapd /usr/local/bin/
+sudo cp pccsadmin /usr/local/bin/
+```
+
+**Windows (x86_64):**
+```powershell
+# Download from: https://github.com/KarpelesLab/intel-dcapd/releases/latest
+# Extract intel-dcapd-windows-amd64-VERSION.zip
+# Run intel-dcapd.exe and pccsadmin.exe from the extracted folder
+```
+
+Each release includes:
+- `intel-dcapd` - Main PCCS service binary
+- `pccsadmin` - Administration CLI tool for managing PCCS
+- `README.md` - Main documentation
+- `README.pccsadmin.md` - Administration tool documentation
+- `LICENSE` - License information
+
+### Build from Source
+
+```bash
+git clone https://github.com/KarpelesLab/intel-dcapd.git
+cd intel-dcapd
+go build -o intel-dcapd
+```
+
+Requirements: Go 1.23 or later
 
 ## Quick Start
 
@@ -197,15 +245,6 @@ This Go implementation achieves API compatibility with Intel's reference PCCS bu
 - Cache refresh mechanism
 - Appraisal policy storage and retrieval
 - OFFLINE mode for air-gapped deployments
-
-## Building from Source
-
-```bash
-go build -o intel-dcapd
-```
-
-Requirements:
-- Go 1.23 or later
 
 ## Deployment
 
