@@ -83,7 +83,7 @@ All configuration is via environment variables:
 
 ## Caching Modes
 
-### LAZY Mode (Default) ✅
+### LAZY Mode (Default)
 
 Cache-on-demand: fetches from Intel PCS when data is not in cache.
 
@@ -92,7 +92,7 @@ Cache-on-demand: fetches from Intel PCS when data is not in cache.
 - Automatic cache population
 - **Fully supported**
 
-### REQ Mode ✅
+### REQ Mode
 
 Pre-caches platform data during registration.
 
@@ -101,7 +101,7 @@ Pre-caches platform data during registration.
 - Good for production with initial internet access
 - **Fully supported**
 
-### OFFLINE Mode ✅
+### OFFLINE Mode
 
 No internet access required at runtime.
 
@@ -115,18 +115,18 @@ No internet access required at runtime.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| PCK Certificate caching | ✅ Fully supported | GET /pckcert |
-| TCB Info (SGX & TDX) | ✅ Fully supported | Both v3 and v4 APIs |
-| Enclave identities | ✅ Fully supported | QE, QVE, TDQE |
-| CRL caching | ✅ Fully supported | PCK, Root CA, generic |
-| Platform registration | ✅ Fully supported | POST /platforms |
-| Platform listing | ✅ Fully supported | GET /platforms |
-| Manual cache refresh | ✅ Fully supported | GET/POST /refresh |
-| Appraisal policies | ✅ Fully supported | PUT/GET /appraisalpolicy |
-| Platform collateral upload | ✅ Fully supported | PUT /platformcollateral (OFFLINE mode) |
-| Background cache refresh | ✅ Fully supported | Automatic daily refresh |
-| v3 API compatibility | ✅ Fully supported | All endpoints support v3 |
-| v4 API | ✅ Fully supported | Primary API version |
+| PCK Certificate caching | Fully supported | GET /pckcert |
+| TCB Info (SGX & TDX) | Fully supported | Both v3 and v4 APIs |
+| Enclave identities | Fully supported | QE, QVE, TDQE |
+| CRL caching | Fully supported | PCK, Root CA, generic |
+| Platform registration | Fully supported | POST /platforms |
+| Platform listing | Fully supported | GET /platforms |
+| Manual cache refresh | Fully supported | GET/POST /refresh |
+| Appraisal policies | Fully supported | PUT/GET /appraisalpolicy |
+| Platform collateral upload | Fully supported | PUT /platformcollateral (OFFLINE mode) |
+| Background cache refresh | Fully supported | Automatic daily refresh |
+| v3 API compatibility | Fully supported | All endpoints support v3 |
+| v4 API | Fully supported | Primary API version |
 
 ## API Endpoints
 

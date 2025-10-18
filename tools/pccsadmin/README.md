@@ -200,11 +200,11 @@ pccsadmin refresh -f 00906EA10000 -t YOUR_ADMIN_TOKEN
 This Go implementation provides the core functionality of Intel's PccsAdminTool with some differences:
 
 ### Implemented:
-- ✅ `get` - Full support for fetching platforms from PCCS
-- ✅ `put` - Full support for uploading collateral and policies
-- ✅ `collect` - Full support for collecting CSV data
-- ✅ `refresh` - Full support for triggering cache refresh
-- ✅ `fetch` - Basic CRL fetch support
+- `get` - Full support for fetching platforms from PCCS
+- `put` - Full support for uploading collateral and policies
+- `collect` - Full support for collecting CSV data
+- `refresh` - Full support for triggering cache refresh
+- `fetch` - Basic CRL fetch support
 
 ### Simplified:
 - `fetch` command - Simplified implementation for CRL-only fetching
