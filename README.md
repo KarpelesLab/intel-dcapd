@@ -35,6 +35,17 @@ Download the latest release from [GitHub Releases](https://github.com/KarpelesLa
 wget https://github.com/KarpelesLab/intel-dcapd/releases/latest/download/intel-dcapd-linux-amd64.tar.gz
 tar -xzf intel-dcapd-linux-amd64.tar.gz
 cd intel-dcapd-linux-amd64-*/
+sudo make install onboot INTEL_API_KEY=your-api-key-here
+```
+
+This will install the binaries to `/usr/local/bin`, create a systemd service, and start it automatically.
+
+**Manual installation (Linux):**
+```bash
+# Just install binaries without systemd service
+sudo make install
+
+# Or copy manually
 sudo cp intel-dcapd /usr/local/bin/
 sudo cp pccsadmin /usr/local/bin/
 ```
@@ -44,8 +55,7 @@ sudo cp pccsadmin /usr/local/bin/
 wget https://github.com/KarpelesLab/intel-dcapd/releases/latest/download/intel-dcapd-linux-i386.tar.gz
 tar -xzf intel-dcapd-linux-i386.tar.gz
 cd intel-dcapd-linux-i386-*/
-sudo cp intel-dcapd /usr/local/bin/
-sudo cp pccsadmin /usr/local/bin/
+sudo make install onboot INTEL_API_KEY=your-api-key-here
 ```
 
 **Windows (x86_64):**
@@ -58,6 +68,8 @@ sudo cp pccsadmin /usr/local/bin/
 Each release includes:
 - `intel-dcapd` - Main PCCS service binary
 - `pccsadmin` - Administration CLI tool for managing PCCS
+- `Makefile` - Installation helper (Linux only)
+- `intel-dcapd.service.in` - Systemd service template (Linux only)
 - `README.md` - Main documentation
 - `README.pccsadmin.md` - Administration tool documentation
 - `LICENSE` - License information
@@ -250,6 +262,23 @@ This Go implementation achieves API compatibility with Intel's reference PCCS bu
 
 ### Systemd Service
 
+**Automated installation (from release tarball):**
+
+The Linux release tarballs include a Makefile that handles installation:
+
+```bash
+# Install binaries and setup systemd service
+sudo make install onboot INTEL_API_KEY=your-api-key-here
+
+# Check status
+systemctl status intel-dcapd
+
+# View logs
+journalctl -u intel-dcapd -f
+```
+
+**Manual installation:**
+
 Create `/etc/systemd/system/intel-dcapd.service`:
 
 ```ini
@@ -259,7 +288,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=dcapd
+User=root
 Environment="INTEL_API_KEY=your-key-here"
 ExecStart=/usr/local/bin/intel-dcapd
 Restart=on-failure
@@ -271,8 +300,8 @@ WantedBy=multi-user.target
 Enable and start:
 
 ```bash
-sudo systemctl enable intel-dcapd
-sudo systemctl start intel-dcapd
+sudo systemctl daemon-reload
+sudo systemctl enable --now intel-dcapd
 ```
 
 ### Docker

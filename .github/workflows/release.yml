@@ -71,6 +71,8 @@ jobs:
           cp ${{ matrix.admin_binary }} dist/$DIRNAME/
           cp README.md LICENSE dist/$DIRNAME/
           cp tools/pccsadmin/README.md dist/$DIRNAME/README.pccsadmin.md
+          cp contrib/Makefile dist/$DIRNAME/
+          cp contrib/intel-dcapd.service.in dist/$DIRNAME/
           cd dist
           tar -czf $ARCHIVE $DIRNAME
 
