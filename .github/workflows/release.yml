@@ -17,18 +17,22 @@ jobs:
             goarch: amd64
             name: intel-dcapd-linux-amd64
             binary: intel-dcapd
+            admin_binary: pccsadmin
           - goos: linux
             goarch: '386'
             name: intel-dcapd-linux-i386
             binary: intel-dcapd
+            admin_binary: pccsadmin
           - goos: windows
             goarch: amd64
             name: intel-dcapd-windows-amd64
             binary: intel-dcapd.exe
+            admin_binary: pccsadmin.exe
           - goos: windows
             goarch: '386'
             name: intel-dcapd-windows-i386
             binary: intel-dcapd.exe
+            admin_binary: pccsadmin.exe
 
     steps:
       - name: Checkout code
@@ -48,31 +52,36 @@ jobs:
             echo "version=dev" >> $GITHUB_OUTPUT
           fi
 
-      - name: Build binary
+      - name: Build binaries
         env:
           CGO_ENABLED: 0
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
           go build -ldflags="-s -w" -o ${{ matrix.binary }}
+          go build -ldflags="-s -w" -o ${{ matrix.admin_binary }} ./tools/pccsadmin
 
-      - name: Package binary (Linux)
+      - name: Package binaries (Linux)
         if: matrix.goos == 'linux'
         run: |
           DIRNAME="${{ matrix.name }}-${{ steps.get_version.outputs.version }}"
           mkdir -p dist/$DIRNAME
           cp ${{ matrix.binary }} dist/$DIRNAME/
+          cp ${{ matrix.admin_binary }} dist/$DIRNAME/
           cp README.md LICENSE dist/$DIRNAME/
+          cp tools/pccsadmin/README.md dist/$DIRNAME/README.pccsadmin.md
           cd dist
           tar -czf $DIRNAME.tar.gz $DIRNAME
 
-      - name: Package binary (Windows)
+      - name: Package binaries (Windows)
         if: matrix.goos == 'windows'
         run: |
           DIRNAME="${{ matrix.name }}-${{ steps.get_version.outputs.version }}"
           mkdir -p dist/$DIRNAME
           cp ${{ matrix.binary }} dist/$DIRNAME/
+          cp ${{ matrix.admin_binary }} dist/$DIRNAME/
           cp README.md LICENSE dist/$DIRNAME/
+          cp tools/pccsadmin/README.md dist/$DIRNAME/README.pccsadmin.md
           cd dist
           zip -r $DIRNAME.zip $DIRNAME
 

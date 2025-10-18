@@ -6,10 +6,10 @@ GOPATH:=$(shell $(GOROOT)/bin/go env GOPATH)
 
 all:
 	$(GOPATH)/bin/goimports -w -l .
-	$(GOROOT)/bin/go build -v
+	$(GOROOT)/bin/go build -v ./...
 
 deps:
 	$(GOROOT)/bin/go get -v -t .
 
 test:
-	$(GOROOT)/bin/go test -v
+	$(GOROOT)/bin/go test -v ./...
