@@ -168,12 +168,18 @@ func handlePCKCert(db *cache.DB, pcsClient *pcs.Client, cacheMode string) http.H
 				return
 			}
 
+			logVerbose("Successfully fetched and cached platform data")
+
 			// Try again after caching
 			platform, _ = db.GetPlatform(qeID, pceID)
 			if platform == nil {
+				log.Printf("ERROR: Platform was fetched but not found in cache after storage")
 				http.Error(w, "Failed to cache platform", http.StatusInternalServerError)
 				return
 			}
+
+			logVerbose("Platform retrieved from cache after fetch: FMSPC=%s CA=%s", platform.FMSPC, platform.CA)
+			logVerbose("Performing certificate selection for newly cached platform")
 
 			cert, tcbm, err := selectPCKCert(db, pcsClient, qeID, pceID, cpuSVN, pceSVN, platform)
 			if err != nil {
@@ -189,19 +195,33 @@ func handlePCKCert(db *cache.DB, pcsClient *pcs.Client, cacheMode string) http.H
 
 // selectPCKCert performs PCK certificate selection
 func selectPCKCert(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, cpuSVN, pceSVN string, platform *cache.Platform) ([]byte, string, error) {
+	logVerbose("selectPCKCert: Getting all certs for qeid=%s pceid=%s", qeID, pceID)
+
 	// Get all certs for this platform
 	allCerts, err := db.GetAllCerts(qeID, pceID)
 	if err != nil || len(allCerts) == 0 {
-		return nil, "", fmt.Errorf("no certificates found for platform")
+		return nil, "", fmt.Errorf("no certificates found for platform (count=%d, err=%v)", len(allCerts), err)
 	}
 
+	logVerbose("selectPCKCert: Found %d certificates in cache", len(allCerts))
+
 	// Get TCB info for selection
+	logVerbose("selectPCKCert: Fetching TCB info for FMSPC=%s", platform.FMSPC)
 	tcbInfo, err := db.GetTCBInfo(cache.ProdTypeSGX, platform.FMSPC, "4", cache.UpdateTypeEarly)
 	if err != nil || tcbInfo == nil {
+		logVerbose("selectPCKCert: Early TCB info not found, trying standard")
 		tcbInfo, err = db.GetTCBInfo(cache.ProdTypeSGX, platform.FMSPC, "4", cache.UpdateTypeStandard)
 	}
 	if err != nil || tcbInfo == nil {
-		return nil, "", fmt.Errorf("no TCB info found for FMSPC %s", platform.FMSPC)
+		// Try to fetch from PCS
+		logVerbose("selectPCKCert: TCB info not in cache, fetching from PCS")
+		resp, err := pcsClient.GetTCBInfoForSGX(platform.FMSPC, "4", cache.UpdateTypeStandard)
+		if err != nil || resp.StatusCode != 200 {
+			return nil, "", fmt.Errorf("no TCB info found for FMSPC %s (err=%v, status=%v)", platform.FMSPC, err, resp)
+		}
+		tcbInfo = resp.Body
+		db.PutTCBInfo(cache.ProdTypeSGX, platform.FMSPC, "4", cache.UpdateTypeStandard, tcbInfo)
+		logVerbose("selectPCKCert: Fetched and cached TCB info from PCS")
 	}
 
 	// Convert certs map to slice for selection
@@ -212,11 +232,14 @@ func selectPCKCert(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, cpuSVN, pce
 		tcbmList = append(tcbmList, tcbm)
 	}
 
+	logVerbose("selectPCKCert: Running certificate selection algorithm")
 	// Select best matching certificate
 	idx, err := pckcertselect.SelectCertificate(certList, cpuSVN, pceSVN, pceID, tcbInfo)
 	if err != nil || idx < 0 {
-		return nil, "", fmt.Errorf("no matching certificate found")
+		return nil, "", fmt.Errorf("no matching certificate found: %v", err)
 	}
+
+	logVerbose("selectPCKCert: Selected certificate index=%d tcbm=%s", idx, tcbmList[idx])
 
 	return []byte(certList[idx]), tcbmList[idx], nil
 }
@@ -284,8 +307,9 @@ func fetchAndCachePlatform(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, enc
 		CA:      strings.ToLower(caType),
 	}
 	if err := db.PutPlatform(qeID, pceID, platform); err != nil {
-		return err
+		return fmt.Errorf("failed to store platform: %w", err)
 	}
+	logVerbose("Stored platform: FMSPC=%s CA=%s", fmspc, strings.ToLower(caType))
 
 	// Store certificate chain (keep it URL-encoded, like Intel's implementation)
 	if issuerChain != "" {
@@ -294,10 +318,14 @@ func fetchAndCachePlatform(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, enc
 			RootCert:  issuerChain, // Store URL-encoded
 			IntmdCert: "",
 		}
-		db.PutCertChain(strings.ToLower(caType), certChain)
+		if err := db.PutCertChain(strings.ToLower(caType), certChain); err != nil {
+			return fmt.Errorf("failed to store cert chain: %w", err)
+		}
+		logVerbose("Stored certificate chain for CA=%s (length=%d)", strings.ToLower(caType), len(issuerChain))
 	}
 
 	// Store individual certificates from the response (URL-decode them first)
+	storedCount := 0
 	for _, certData := range certsArray {
 		// Skip "Not available" certificates
 		if certData.Cert == "Not available" {
@@ -311,8 +339,13 @@ func fetchAndCachePlatform(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, enc
 			decodedCert = certData.Cert // Use as-is if decode fails
 		}
 
-		db.PutCert(qeID, pceID, certData.TCBM, []byte(decodedCert))
+		if err := db.PutCert(qeID, pceID, certData.TCBM, []byte(decodedCert)); err != nil {
+			log.Printf("Failed to store certificate tcbm=%s: %v", certData.TCBM, err)
+			continue
+		}
+		storedCount++
 	}
+	logVerbose("Stored %d certificates", storedCount)
 
 	return nil
 }
