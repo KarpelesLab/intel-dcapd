@@ -13,6 +13,16 @@ import (
 	"github.com/KarpelesLab/intel-dcapd/pcs"
 )
 
+// Global verbose flag
+var verbose bool
+
+// logVerbose logs a message only if verbose mode is enabled
+func logVerbose(format string, v ...interface{}) {
+	if verbose {
+		log.Printf("[VERBOSE] "+format, v...)
+	}
+}
+
 func main() {
 	// Required: Intel API Key
 	apiKey := os.Getenv("INTEL_API_KEY")
@@ -25,6 +35,12 @@ func main() {
 	dbPath := getEnv("DCAPD_DB_PATH", defaultDBPath())
 	pcsURL := getEnv("DCAPD_PCS_URL", "https://api.trustedservices.intel.com/sgx/certification/v4/")
 	cacheMode := getEnv("DCAPD_CACHE_MODE", "LAZY")
+
+	// Enable verbose logging if requested
+	if os.Getenv("DCAPD_VERBOSE") == "1" || os.Getenv("DCAPD_VERBOSE") == "true" {
+		verbose = true
+		log.Printf("Verbose logging enabled")
+	}
 
 	log.Printf("Starting Intel DCAP Provisioning Certificate Caching Service")
 	log.Printf("Listen address: %s", listenAddr)

@@ -68,6 +68,7 @@ All configuration is via environment variables:
 - **`DCAPD_DB_PATH`** - Database path (default: `~/.cache/intel-dcapd/cachedb`)
 - **`DCAPD_CACHE_MODE`** - Caching mode: `LAZY`, `REQ`, or `OFFLINE` (default: `LAZY`)
 - **`DCAPD_PCS_URL`** - Intel PCS URL (default: `https://api.trustedservices.intel.com/sgx/certification/v4/`)
+- **`DCAPD_VERBOSE`** - Enable verbose logging: `1` or `true` (default: disabled)
 
 ### TLS Certificate (Optional)
 
@@ -304,6 +305,23 @@ Logs go to standard output. Key events logged:
 
 ## Troubleshooting
 
+### Enable Verbose Logging
+
+For detailed debugging information:
+
+```bash
+export DCAPD_VERBOSE=1
+./intel-dcapd
+```
+
+Verbose mode logs:
+- All request parameters
+- Cache hits and misses
+- Certificate selection process
+- Intel PCS request/response details
+- Certificate and issuer chain lengths
+- Response headers being sent
+
 ### "INTEL_API_KEY environment variable is required"
 
 You need to set the API key. Get one from: https://api.portal.trustedservices.intel.com/
@@ -318,6 +336,17 @@ Set `"use_secure_cert": false` in `/etc/sgx_default_qcnl.conf` if using auto-gen
 - Verify internet connectivity to Intel PCS
 - Check logs for Intel PCS errors
 - Ensure the platform has been properly registered
+- **Enable verbose logging** to see detailed request flow
+
+### "No certificate data for this platform"
+
+This can indicate certificate encoding issues:
+
+1. Enable verbose logging: `export DCAPD_VERBOSE=1`
+2. Clear the cache: `rm -rf ~/.cache/intel-dcapd/cachedb`
+3. Restart the service
+4. Check verbose logs for certificate lengths and encoding
+5. Verify AESM is using the correct PCCS URL in `/etc/sgx_default_qcnl.conf`
 
 ## License and Disclaimer
 

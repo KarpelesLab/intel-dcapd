@@ -81,6 +81,14 @@ func handlePCKCert(db *cache.DB, pcsClient *pcs.Client, cacheMode string) http.H
 		pceID := strings.ToUpper(r.URL.Query().Get("pceid"))
 		encPPID := strings.ToUpper(r.URL.Query().Get("encrypted_ppid"))
 
+		logVerbose("PCK cert request: qeid=%s cpusvn=%s pcesvn=%s pceid=%s encrypted_ppid=%s",
+			qeID, cpuSVN, pceSVN, pceID, func() string {
+				if encPPID != "" {
+					return encPPID[:16] + "..."
+				}
+				return "(none)"
+			}())
+
 		// Validate required parameters
 		if qeID == "" || cpuSVN == "" || pceSVN == "" || pceID == "" {
 			http.Error(w, "Missing required parameters", http.StatusBadRequest)
@@ -106,20 +114,31 @@ func handlePCKCert(db *cache.DB, pcsClient *pcs.Client, cacheMode string) http.H
 			return
 		}
 
+		if platform != nil {
+			logVerbose("Platform found in cache: FMSPC=%s CA=%s", platform.FMSPC, platform.CA)
+		} else {
+			logVerbose("Platform not in cache, will need to fetch")
+		}
+
 		// Check if we have a matching cert in cache
 		tcbm, _ := db.GetPlatformTCB(qeID, pceID, cpuSVN, pceSVN)
 		if tcbm != "" {
+			logVerbose("Found TCB mapping: %s", tcbm)
 			cert, err := db.GetCert(qeID, pceID, tcbm)
 			if err == nil && cert != nil && platform != nil {
 				// Cache hit!
+				logVerbose("Cache HIT: Returning cached certificate (length=%d)", len(cert))
 				writePCKCertResponse(w, cert, tcbm, platform, db)
 				return
 			}
+		} else {
+			logVerbose("No TCB mapping found for cpusvn=%s pcesvn=%s", cpuSVN, pceSVN)
 		}
 
 		// Cache miss - need to get certificate
 		if platform != nil {
 			// Platform known - perform cert selection
+			logVerbose("Cache MISS: Performing certificate selection")
 			cert, tcbm, err := selectPCKCert(db, pcsClient, qeID, pceID, cpuSVN, pceSVN, platform)
 			if err != nil {
 				log.Printf("Certificate selection failed: %v", err)
@@ -127,17 +146,22 @@ func handlePCKCert(db *cache.DB, pcsClient *pcs.Client, cacheMode string) http.H
 				return
 			}
 
+			logVerbose("Selected certificate: tcbm=%s length=%d", tcbm, len(cert))
+
 			// Store the TCB mapping
 			db.PutPlatformTCB(qeID, pceID, cpuSVN, pceSVN, tcbm)
 
 			writePCKCertResponse(w, cert, tcbm, platform, db)
 		} else {
 			// Platform unknown - fetch from Intel PCS (LAZY mode)
+			logVerbose("Cache MISS: Platform not known")
 			if cacheMode != "LAZY" {
+				log.Printf("Platform unknown and not in LAZY mode")
 				http.Error(w, "Platform unknown", http.StatusNotFound)
 				return
 			}
 
+			logVerbose("Fetching platform from Intel PCS")
 			if err := fetchAndCachePlatform(db, pcsClient, qeID, pceID, encPPID); err != nil {
 				log.Printf("Failed to fetch platform from PCS: %v", err)
 				http.Error(w, "Platform not found", http.StatusNotFound)
@@ -199,11 +223,15 @@ func selectPCKCert(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, cpuSVN, pce
 
 // fetchAndCachePlatform fetches platform data from Intel PCS and caches it
 func fetchAndCachePlatform(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, encPPID string) error {
+	logVerbose("Fetching PCK certs from Intel PCS for qeid=%s pceid=%s", qeID, pceID)
+
 	// Fetch all PCK certs for this platform
 	resp, err := pcsClient.GetPCKCerts(encPPID, pceID)
 	if err != nil {
 		return err
 	}
+
+	logVerbose("Intel PCS response: status=%d body_length=%d", resp.StatusCode, len(resp.Body))
 
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("PCS returned status %d", resp.StatusCode)
@@ -213,6 +241,9 @@ func fetchAndCachePlatform(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, enc
 	fmspc := resp.Headers.Get("SGX-FMSPC")
 	caType := resp.Headers.Get("SGX-PCK-Certificate-CA-Type")
 	issuerChain := resp.Headers.Get("SGX-PCK-Certificate-Issuer-Chain")
+
+	logVerbose("PCS response headers: FMSPC=%s CA=%s IssuerChain_length=%d",
+		fmspc, caType, len(issuerChain))
 
 	if fmspc == "" || caType == "" {
 		return fmt.Errorf("missing required headers from PCS")
@@ -228,6 +259,8 @@ func fetchAndCachePlatform(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, enc
 		return err
 	}
 
+	logVerbose("Received %d certificates from PCS", len(certsArray))
+
 	// Filter out "Not available" certificates
 	validCerts := 0
 	for _, certData := range certsArray {
@@ -235,6 +268,8 @@ func fetchAndCachePlatform(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, enc
 			validCerts++
 		}
 	}
+
+	logVerbose("Valid certificates: %d (filtered out %d 'Not available')", validCerts, len(certsArray)-validCerts)
 
 	if validCerts == 0 {
 		return fmt.Errorf("no valid certificates in PCS response")
@@ -289,6 +324,21 @@ func writePCKCertResponse(w http.ResponseWriter, cert []byte, tcbm string, platf
 	issuerChain := ""
 	if certChain != nil {
 		issuerChain = certChain.RootCert + certChain.IntmdCert
+	}
+
+	logVerbose("Sending PCK cert response: tcbm=%s fmspc=%s ca=%s cert_length=%d issuer_chain_length=%d",
+		tcbm, platform.FMSPC, platform.CA, len(cert), len(issuerChain))
+
+	// Log first and last bytes of cert for debugging
+	if verbose && len(cert) > 0 {
+		certPreview := string(cert)
+		if len(certPreview) > 50 {
+			certPreview = certPreview[:50]
+		}
+		logVerbose("Certificate starts with: %s...", certPreview)
+		if len(issuerChain) > 100 {
+			logVerbose("Issuer chain starts with: %s...", issuerChain[:100])
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/x-pem-file")
