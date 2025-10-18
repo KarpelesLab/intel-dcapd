@@ -38,7 +38,11 @@ cd intel-dcapd-linux-amd64-*/
 sudo make install onboot INTEL_API_KEY=your-api-key-here
 ```
 
-This will install the binaries to `/usr/local/bin`, create a systemd service, and start it automatically.
+This will:
+- Install binaries to `/usr/local/bin`
+- Create a system user `dcapd` (customizable with `PCCS_USER=username`)
+- Create cache directory `/var/cache/intel-dcapd`
+- Install and start a systemd service
 
 **Manual installation (Linux):**
 ```bash
@@ -101,7 +105,7 @@ export INTEL_API_KEY=your-api-key-here
 That's it! The service will:
 - Listen on `https://localhost:8081`
 - Auto-generate a self-signed TLS certificate (in-memory)
-- Store cache in `~/.cache/intel-dcapd/cachedb`
+- Store cache in `~/.cache/intel-dcapd/` (database at `cachedb` subdirectory)
 - Start serving requests
 
 ### 3. Configure Your SGX Client
@@ -126,7 +130,7 @@ All configuration is via environment variables:
 ### Optional
 
 - **`DCAPD_LISTEN`** - Listen address (default: `localhost:8081`)
-- **`DCAPD_DB_PATH`** - Database path (default: `~/.cache/intel-dcapd/cachedb`)
+- **`DCAPD_CACHE_DIR`** - Cache directory (default: `~/.cache/intel-dcapd`)
 - **`DCAPD_CACHE_MODE`** - Caching mode: `LAZY`, `REQ`, or `OFFLINE` (default: `LAZY`)
 - **`DCAPD_PCS_URL`** - Intel PCS URL (default: `https://api.trustedservices.intel.com/sgx/certification/v4/`)
 - **`DCAPD_VERBOSE`** - Enable verbose logging: `1` or `true` (default: disabled)
@@ -270,6 +274,9 @@ The Linux release tarballs include a Makefile that handles installation:
 # Install binaries and setup systemd service
 sudo make install onboot INTEL_API_KEY=your-api-key-here
 
+# Optional: customize user and cache location
+sudo make install onboot INTEL_API_KEY=your-api-key-here PCCS_USER=pccs CACHE_DIR=/opt/pccs-cache
+
 # Check status
 systemctl status intel-dcapd
 
@@ -277,7 +284,23 @@ systemctl status intel-dcapd
 journalctl -u intel-dcapd -f
 ```
 
+The Makefile automatically:
+- Creates a system user (default: `dcapd`)
+- Sets up cache directory with proper permissions (default: `/var/cache/intel-dcapd`)
+- Installs and enables the systemd service
+
 **Manual installation:**
+
+Create a system user and cache directory:
+
+```bash
+PCCS_USER=dcapd
+CACHE_DIR=/var/cache/intel-dcapd
+
+sudo useradd --system --no-create-home --shell /bin/false $PCCS_USER
+sudo mkdir -p $CACHE_DIR
+sudo chown $PCCS_USER:$PCCS_USER $CACHE_DIR
+```
 
 Create `/etc/systemd/system/intel-dcapd.service`:
 
@@ -288,14 +311,25 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+User=dcapd
+Group=dcapd
 Environment="INTEL_API_KEY=your-key-here"
+Environment="DCAPD_CACHE_DIR=/var/cache/intel-dcapd"
 ExecStart=/usr/local/bin/intel-dcapd
 Restart=on-failure
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/cache/intel-dcapd
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+**Note:** Adjust `User`, `Group`, `DCAPD_CACHE_DIR`, and `ReadWritePaths` in the service file if using different values.
 
 Enable and start:
 
@@ -408,7 +442,7 @@ Set `"use_secure_cert": false` in `/etc/sgx_default_qcnl.conf` if using auto-gen
 This can indicate certificate encoding issues:
 
 1. Enable verbose logging: `export DCAPD_VERBOSE=1`
-2. Clear the cache: `rm -rf ~/.cache/intel-dcapd/cachedb`
+2. Clear the cache: `rm -rf ~/.cache/intel-dcapd/`
 3. Restart the service
 4. Check verbose logs for certificate lengths and encoding
 5. Verify AESM is using the correct PCCS URL in `/etc/sgx_default_qcnl.conf`

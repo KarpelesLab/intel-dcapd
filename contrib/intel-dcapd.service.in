@@ -5,8 +5,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+User=@PCCS_USER@
+Group=@PCCS_USER@
 Environment="INTEL_API_KEY=@INTEL_API_KEY@"
+Environment="DCAPD_CACHE_DIR=@CACHE_DIR@"
 ExecStart=@BINDIR@/intel-dcapd
 Restart=on-failure
 RestartSec=5s
@@ -16,7 +18,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/root/.cache/intel-dcapd
+ReadWritePaths=@CACHE_DIR@
 
 [Install]
 WantedBy=multi-user.target

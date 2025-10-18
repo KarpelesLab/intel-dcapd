@@ -33,7 +33,7 @@ func main() {
 
 	// Optional environment variables with defaults
 	listenAddr := getEnv("DCAPD_LISTEN", "localhost:8081")
-	dbPath := getEnv("DCAPD_DB_PATH", defaultDBPath())
+	cacheDir := getEnv("DCAPD_CACHE_DIR", defaultCacheDir())
 	pcsURL := getEnv("DCAPD_PCS_URL", "https://api.trustedservices.intel.com/sgx/certification/v4/")
 	cacheMode := getEnv("DCAPD_CACHE_MODE", "LAZY")
 
@@ -44,8 +44,12 @@ func main() {
 		log.Printf("Verbose logging enabled")
 	}
 
+	// Database is stored in cachedb subdirectory
+	dbPath := filepath.Join(cacheDir, "cachedb")
+
 	log.Printf("Starting Intel DCAP Provisioning Certificate Caching Service")
 	log.Printf("Listen address: %s", listenAddr)
+	log.Printf("Cache directory: %s", cacheDir)
 	log.Printf("Database path: %s", dbPath)
 	log.Printf("Cache mode: %s", cacheMode)
 
@@ -97,13 +101,13 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-func defaultDBPath() string {
+func defaultCacheDir() string {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		// Fallback to current directory
 		return "./intel-dcapd-cache"
 	}
-	return filepath.Join(cacheDir, "intel-dcapd", "cachedb")
+	return filepath.Join(cacheDir, "intel-dcapd")
 }
 
 func getTLSConfig() *tls.Config {
