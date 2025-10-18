@@ -46,6 +46,7 @@ const (
 	prefixCRLURI      = "crl:uri:"
 	prefixPlatformTCB = "platform_tcb:"
 	prefixRegistered  = "registered:"
+	prefixPolicy      = "policy:"
 )
 
 // Platform operations
@@ -183,6 +184,57 @@ func (d *DB) GetTCBInfo(prodType, fmspc, version, updateType string) ([]byte, er
 func (d *DB) PutTCBInfo(prodType, fmspc, version, updateType string, tcbInfo []byte) error {
 	key := fmt.Sprintf("%s%s:%s:%s:%s", prefixTCB, prodType, fmspc, version, updateType)
 	return d.db.Set([]byte(key), tcbInfo, pebble.Sync)
+}
+
+// GetAllPlatforms returns all platforms in the database
+func (d *DB) GetAllPlatforms() ([]*Platform, error) {
+	iter, err := d.db.NewIter(&pebble.IterOptions{
+		LowerBound: []byte(prefixPlatform),
+		UpperBound: []byte(prefixPlatform + "\xff"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+
+	var platforms []*Platform
+	for iter.First(); iter.Valid(); iter.Next() {
+		var platform Platform
+		if err := json.Unmarshal(iter.Value(), &platform); err == nil {
+			platforms = append(platforms, &platform)
+		}
+	}
+
+	return platforms, iter.Error()
+}
+
+// GetPlatformsByFMSPC returns platforms with specific FMSPCs
+func (d *DB) GetPlatformsByFMSPC(fmspcs []string) ([]*Platform, error) {
+	iter, err := d.db.NewIter(&pebble.IterOptions{
+		LowerBound: []byte(prefixPlatform),
+		UpperBound: []byte(prefixPlatform + "\xff"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+
+	fmspcSet := make(map[string]bool)
+	for _, fmspc := range fmspcs {
+		fmspcSet[strings.ToUpper(strings.TrimSpace(fmspc))] = true
+	}
+
+	var platforms []*Platform
+	for iter.First(); iter.Valid(); iter.Next() {
+		var platform Platform
+		if err := json.Unmarshal(iter.Value(), &platform); err == nil {
+			if fmspcSet[platform.FMSPC] {
+				platforms = append(platforms, &platform)
+			}
+		}
+	}
+
+	return platforms, iter.Error()
 }
 
 // GetAllFMSPCs returns all unique FMSPCs in the database
@@ -387,4 +439,29 @@ func (d *DB) GetAllRegisteredPlatforms() ([]*RegisteredPlatform, error) {
 	}
 
 	return platforms, iter.Error()
+}
+
+// Appraisal Policy operations
+
+// PutAppraisalPolicy stores an appraisal policy for a specific FMSPC
+func (d *DB) PutAppraisalPolicy(fmspc string, policy []byte) error {
+	key := fmt.Sprintf("%s%s", prefixPolicy, strings.ToUpper(fmspc))
+	return d.db.Set([]byte(key), policy, pebble.Sync)
+}
+
+// GetAppraisalPolicy retrieves appraisal policy for a specific FMSPC
+func (d *DB) GetAppraisalPolicy(fmspc string) ([]byte, error) {
+	key := fmt.Sprintf("%s%s", prefixPolicy, strings.ToUpper(fmspc))
+	value, closer, err := d.db.Get([]byte(key))
+	if err != nil {
+		if err == pebble.ErrNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer closer.Close()
+
+	result := make([]byte, len(value))
+	copy(result, value)
+	return result, nil
 }

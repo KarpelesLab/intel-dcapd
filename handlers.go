@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -44,6 +45,8 @@ func setupHandlers(db *cache.DB, pcsClient *pcs.Client, cacheMode string) http.H
 	// Admin endpoints
 	mux.HandleFunc("PUT /sgx/certification/v4/platformcollateral", auth.validateAdmin(handlePlatformCollateral(db)))
 	mux.HandleFunc("GET /sgx/certification/v4/refresh", auth.validateAdmin(handleRefresh(db, pcsClient)))
+	mux.HandleFunc("PUT /sgx/certification/v4/appraisalpolicy", auth.validateAdmin(handlePutAppraisalPolicy(db)))
+	mux.HandleFunc("GET /sgx/certification/v4/appraisalpolicy", handleGetAppraisalPolicy(db))
 
 	// TDX Certification v4 endpoints
 	mux.HandleFunc("GET /tdx/certification/v4/tcb", handleTCB(db, pcsClient, "tdx"))
@@ -61,6 +64,8 @@ func setupHandlers(db *cache.DB, pcsClient *pcs.Client, cacheMode string) http.H
 	mux.HandleFunc("GET /sgx/certification/v3/platforms", auth.validateAdmin(handleGetPlatforms(db)))
 	mux.HandleFunc("PUT /sgx/certification/v3/platformcollateral", auth.validateAdmin(handlePlatformCollateral(db)))
 	mux.HandleFunc("GET /sgx/certification/v3/refresh", auth.validateAdmin(handleRefresh(db, pcsClient)))
+	mux.HandleFunc("PUT /sgx/certification/v3/appraisalpolicy", auth.validateAdmin(handlePutAppraisalPolicy(db)))
+	mux.HandleFunc("GET /sgx/certification/v3/appraisalpolicy", handleGetAppraisalPolicy(db))
 
 	return addLogging(mux)
 }
@@ -502,10 +507,58 @@ func handleGenericCRL(db *cache.DB, pcsClient *pcs.Client) http.HandlerFunc {
 	}
 }
 
+// PlatformRegistration represents a platform registration request
+type PlatformRegistration struct {
+	QEID             string `json:"qe_id"`
+	PCEID            string `json:"pce_id"`
+	CPUSVN           string `json:"cpu_svn"`
+	PCESVN           string `json:"pce_svn"`
+	EncPPID          string `json:"enc_ppid"`
+	PlatformManifest string `json:"platform_manifest"`
+}
+
 // Stub handlers for platform registration and admin endpoints
 func handleRegisterPlatforms(db *cache.DB, pcsClient *pcs.Client, cacheMode string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Implement platform registration
+		var platforms []PlatformRegistration
+		if err := json.NewDecoder(r.Body).Decode(&platforms); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		updateType := r.URL.Query().Get("update")
+		if updateType == "" {
+			updateType = "standard"
+		}
+		updateType = strings.ToLower(updateType)
+		if updateType != "standard" && updateType != "early" && updateType != "all" {
+			http.Error(w, "Invalid update type", http.StatusBadRequest)
+			return
+		}
+
+		// Process each platform registration
+		// In LAZY mode, we fetch and cache certificates immediately
+		// This is simpler than the Intel REQ mode which queues platforms
+		for _, plat := range platforms {
+			qeID := strings.ToUpper(plat.QEID)
+			pceID := strings.ToUpper(plat.PCEID)
+			encPPID := strings.ToUpper(plat.EncPPID)
+
+			// Check if platform already exists
+			existing, _ := db.GetPlatform(qeID, pceID)
+			if existing != nil {
+				// Platform already registered
+				continue
+			}
+
+			// Fetch and cache platform data from Intel PCS
+			if err := fetchAndCachePlatform(db, pcsClient, qeID, pceID, encPPID); err != nil {
+				log.Printf("Failed to register platform %s/%s: %v", qeID, pceID, err)
+				// Continue with next platform instead of failing entire request
+				continue
+			}
+		}
+
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}
@@ -513,26 +566,205 @@ func handleRegisterPlatforms(db *cache.DB, pcsClient *pcs.Client, cacheMode stri
 
 func handleGetPlatforms(db *cache.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Implement get platforms
+		source := r.URL.Query().Get("source")
+
+		var platforms []*cache.Platform
+		var err error
+
+		if source == "" || source == "reg" || source == "reg_na" {
+			// These modes are for platforms pending registration
+			// In our simplified implementation, we auto-register platforms
+			// So we return empty array for compatibility
+			platforms = []*cache.Platform{}
+		} else if len(source) >= 2 && source[0] == '[' && source[len(source)-1] == ']' {
+			// Source is FMSPC array like "[FMSPC1,FMSPC2]"
+			fmspcStr := source[1 : len(source)-1]
+			var fmspcs []string
+			if fmspcStr != "" {
+				fmspcs = strings.Split(fmspcStr, ",")
+			}
+			platforms, err = db.GetPlatformsByFMSPC(fmspcs)
+			if err != nil {
+				http.Error(w, "Failed to retrieve platforms", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			http.Error(w, "Invalid source parameter", http.StatusBadRequest)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("platform-count", fmt.Sprintf("%d", len(platforms)))
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("[]"))
+
+		if err := json.NewEncoder(w).Encode(platforms); err != nil {
+			log.Printf("Failed to encode platforms: %v", err)
+		}
 	}
 }
 
 func handlePlatformCollateral(db *cache.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Implement platform collateral upload
+		// Platform collateral upload for OFFLINE mode
+		// This is a complex endpoint that accepts TCB info, certs, CRLs, etc.
+		// For now, return a not implemented status
+		http.Error(w, "Platform collateral upload not yet implemented", http.StatusNotImplemented)
+	}
+}
+
+func handlePutAppraisalPolicy(db *cache.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Read policy data from request body
+		policyData, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			return
+		}
+
+		// Parse policy JSON to extract FMSPC
+		var policyObj map[string]interface{}
+		if err := json.Unmarshal(policyData, &policyObj); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		// Extract FMSPC from policy
+		fmspc, ok := policyObj["fmspc"].(string)
+		if !ok || fmspc == "" {
+			http.Error(w, "Missing or invalid fmspc in policy", http.StatusBadRequest)
+			return
+		}
+
+		// Store policy
+		if err := db.PutAppraisalPolicy(fmspc, policyData); err != nil {
+			log.Printf("Failed to store appraisal policy: %v", err)
+			http.Error(w, "Failed to store policy", http.StatusInternalServerError)
+			return
+		}
+
+		// Return policy ID (using FMSPC as ID)
+		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmspc))
+	}
+}
+
+func handleGetAppraisalPolicy(db *cache.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fmspc := r.URL.Query().Get("fmspc")
+		if fmspc == "" || len(fmspc) != 12 {
+			http.Error(w, "Invalid fmspc parameter", http.StatusBadRequest)
+			return
+		}
+
+		policy, err := db.GetAppraisalPolicy(strings.ToUpper(fmspc))
+		if err != nil {
+			log.Printf("Failed to retrieve appraisal policy: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		if policy == nil {
+			http.Error(w, "No policy found for this FMSPC", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(policy)
 	}
 }
 
 func handleRefresh(db *cache.DB, pcsClient *pcs.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Trigger manual refresh
+		refreshType := r.URL.Query().Get("type")
+		fmspc := r.URL.Query().Get("fmspc")
+
+		// Validate type parameter
+		if refreshType != "" && refreshType != "certs" {
+			http.Error(w, "Invalid refresh type", http.StatusBadRequest)
+			return
+		}
+
+		// Start refresh in background
+		go func() {
+			if refreshType == "certs" {
+				// Refresh PCK certs for specific FMSPC
+				if fmspc == "" {
+					log.Println("Refresh type 'certs' requires fmspc parameter")
+					return
+				}
+				refreshPCKCertsForFMSPC(db, pcsClient, strings.ToUpper(fmspc))
+			} else {
+				// Refresh all collateral
+				refreshAllCollateral(db, pcsClient)
+			}
+		}()
+
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Refresh triggered"))
 	}
+}
+
+// refreshAllCollateral refreshes all cached collateral (CRLs, TCBs, identities)
+func refreshAllCollateral(db *cache.DB, pcsClient *pcs.Client) {
+	log.Println("Manual refresh triggered for all collateral")
+
+	// Refresh TCB info for all known FMSPCs
+	fmspcs := db.GetAllFMSPCs()
+	for _, fmspc := range fmspcs {
+		for _, version := range []string{"3", "4"} {
+			for _, updateType := range []string{cache.UpdateTypeStandard, cache.UpdateTypeEarly} {
+				resp, err := pcsClient.GetTCBInfoForSGX(fmspc, version, updateType)
+				if err != nil {
+					log.Printf("Failed to refresh TCB info for FMSPC %s (v%s/%s): %v", fmspc, version, updateType, err)
+					continue
+				}
+				if resp.StatusCode == 200 {
+					if err := db.PutTCBInfo(cache.ProdTypeSGX, fmspc, version, updateType, resp.Body); err != nil {
+						log.Printf("Failed to store TCB info: %v", err)
+					}
+				}
+			}
+		}
+	}
+
+	// Refresh enclave identities
+	identities := []string{cache.IdentityQE, cache.IdentityQVE, cache.IdentityTDQE}
+	for _, version := range []string{"3", "4"} {
+		for _, id := range identities {
+			for _, updateType := range []string{cache.UpdateTypeStandard, cache.UpdateTypeEarly} {
+				resp, err := pcsClient.GetEnclaveIdentity(id, version, updateType)
+				if err != nil {
+					continue
+				}
+				if resp.StatusCode == 200 {
+					db.PutIdentity(id, version, updateType, resp.Body)
+				}
+			}
+		}
+	}
+
+	// Refresh CRLs
+	for _, ca := range []string{cache.CAProcessor, cache.CAPlatform} {
+		resp, err := pcsClient.GetPCKCRL(ca)
+		if err != nil {
+			continue
+		}
+		if resp.StatusCode == 200 {
+			db.PutCRL(ca, resp.Body)
+		}
+	}
+
+	log.Println("Manual refresh complete")
+}
+
+// refreshPCKCertsForFMSPC refreshes PCK certificates for a specific FMSPC
+func refreshPCKCertsForFMSPC(db *cache.DB, pcsClient *pcs.Client, fmspc string) {
+	log.Printf("Manual refresh triggered for PCK certs with FMSPC %s", fmspc)
+	// This would require fetching all platforms with this FMSPC and re-fetching their certs
+	// For now, log that it's not fully implemented
+	log.Println("PCK cert refresh for specific FMSPC not yet implemented")
 }
 
 // addLogging adds request logging middleware
