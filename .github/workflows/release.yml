@@ -58,8 +58,10 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          go build -ldflags="-s -w" -o ${{ matrix.binary }}
-          go build -ldflags="-s -w" -o ${{ matrix.admin_binary }} ./tools/pccsadmin
+          VERSION="${{ steps.get_version.outputs.version }}"
+          LDFLAGS="-s -w -X github.com/KarpelesLab/intel-dcapd/version.Version=${VERSION}"
+          go build -ldflags="${LDFLAGS}" -o ${{ matrix.binary }}
+          go build -ldflags="${LDFLAGS}" -o ${{ matrix.admin_binary }} ./tools/pccsadmin
 
       - name: Package binaries (Linux)
         if: matrix.goos == 'linux'

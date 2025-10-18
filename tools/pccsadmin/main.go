@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
-)
 
-const version = "0.1.0"
+	"github.com/KarpelesLab/intel-dcapd/version"
+)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -42,7 +42,7 @@ func main() {
 			os.Exit(1)
 		}
 	case "version", "--version", "-v":
-		fmt.Printf("pccsadmin version %s\n", version)
+		fmt.Printf("pccsadmin version %s\n", version.Version)
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -83,5 +83,5 @@ Examples:
   # Refresh PCCS cache
   pccsadmin refresh -u https://localhost:8081
 
-`, version)
+`, version.Version)
 }

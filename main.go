@@ -12,6 +12,7 @@ import (
 	"github.com/KarpelesLab/intel-dcapd/maintenance"
 	"github.com/KarpelesLab/intel-dcapd/pckcertselect"
 	"github.com/KarpelesLab/intel-dcapd/pcs"
+	"github.com/KarpelesLab/intel-dcapd/version"
 )
 
 // Global verbose flag
@@ -47,7 +48,7 @@ func main() {
 	// Database is stored in cachedb subdirectory
 	dbPath := filepath.Join(cacheDir, "cachedb")
 
-	log.Printf("Starting Intel DCAP Provisioning Certificate Caching Service")
+	log.Printf("Starting Intel DCAP Provisioning Certificate Caching Service (version %s)", version.Version)
 	log.Printf("Listen address: %s", listenAddr)
 	log.Printf("Cache directory: %s", cacheDir)
 	log.Printf("Database path: %s", dbPath)
