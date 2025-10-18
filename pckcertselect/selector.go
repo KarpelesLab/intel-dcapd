@@ -2,6 +2,7 @@ package pckcertselect
 
 import (
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -163,42 +164,117 @@ const (
 
 // extractTCBFromCert extracts TCB components from a PCK certificate
 func extractTCBFromCert(cert *x509.Certificate) ([]byte, int, error) {
+	// Find the base SGX extensions OID
+	var sgxExtValue []byte
+	for _, ext := range cert.Extensions {
+		if ext.Id.String() == SGXExtensionsOID {
+			sgxExtValue = ext.Value
+			logVerbose("Found base SGX extension: OID=%s len=%d", SGXExtensionsOID, len(ext.Value))
+			break
+		}
+	}
+
+	if sgxExtValue == nil {
+		return nil, 0, fmt.Errorf("SGX extensions not found (looked for OID %s)", SGXExtensionsOID)
+	}
+
+	// Parse the nested ASN.1 structure
+	// The extension value contains a SEQUENCE of nested OID/value pairs
+	cpusvn, pcesvn, err := parseSGXExtensions(sgxExtValue)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to parse SGX extensions: %w", err)
+	}
+
+	logVerbose("  Extracted CPUSVN: %x", cpusvn)
+	logVerbose("  Extracted PCESVN: %d (0x%04x)", pcesvn, pcesvn)
+
+	return cpusvn, pcesvn, nil
+}
+
+// parseSGXExtensions parses the nested ASN.1 structure inside the base SGX extension
+func parseSGXExtensions(extValue []byte) ([]byte, int, error) {
+	// The structure is a SEQUENCE containing nested elements
+	// Each element is a SEQUENCE of [OID, value]
+
+	var seq asn1.RawValue
+	rest, err := asn1.Unmarshal(extValue, &seq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to unmarshal base sequence: %w", err)
+	}
+	if len(rest) > 0 {
+		logVerbose("Warning: %d bytes remaining after base sequence", len(rest))
+	}
+
+	if seq.Class != asn1.ClassUniversal || seq.Tag != asn1.TagSequence {
+		return nil, 0, fmt.Errorf("expected SEQUENCE, got class=%d tag=%d", seq.Class, seq.Tag)
+	}
+
+	// Parse the sequence contents
 	var cpusvn []byte
 	var pcesvn int
 	var foundCPUSVN, foundPCESVN bool
 
-	// Debug: log all SGX extension OIDs present
-	logVerbose("Certificate has %d extensions total", len(cert.Extensions))
-	for _, ext := range cert.Extensions {
-		oidStr := ext.Id.String()
-		if strings.HasPrefix(oidStr, SGXExtensionsOID) {
-			logVerbose("  Found SGX extension: OID=%s len=%d", oidStr, len(ext.Value))
+	data := seq.Bytes
+	for len(data) > 0 {
+		var item asn1.RawValue
+		var err error
+		data, err = asn1.Unmarshal(data, &item)
+		if err != nil {
+			logVerbose("Warning: failed to unmarshal item: %v", err)
+			break
 		}
 
-		// CPUSVN extension
-		if oidStr == SGXExtensionsCPUSVN {
-			if len(ext.Value) >= 16 {
-				cpusvn = ext.Value[len(ext.Value)-16:]
+		if item.Class != asn1.ClassUniversal || item.Tag != asn1.TagSequence {
+			continue
+		}
+
+		// Parse [OID, value] pair
+		var oid asn1.ObjectIdentifier
+		var value asn1.RawValue
+		itemData := item.Bytes
+
+		itemData, err = asn1.Unmarshal(itemData, &oid)
+		if err != nil {
+			continue
+		}
+
+		_, err = asn1.Unmarshal(itemData, &value)
+		if err != nil {
+			continue
+		}
+
+		oidStr := oid.String()
+		logVerbose("  Found nested OID: %s (tag=%d, len=%d)", oidStr, value.Tag, len(value.Bytes))
+
+		// Check for CPUSVN (OID ends with .2.18)
+		if oidStr == "2.18" || strings.HasSuffix(oidStr, ".2.18") {
+			if value.Tag == asn1.TagOctetString && len(value.Bytes) >= 16 {
+				cpusvn = make([]byte, 16)
+				copy(cpusvn, value.Bytes[:16])
 				foundCPUSVN = true
-				logVerbose("  Extracted CPUSVN: %x", cpusvn)
+				logVerbose("  -> CPUSVN found")
 			}
 		}
-		// PCESVN extension
-		if oidStr == SGXExtensionsPCESVN {
-			if len(ext.Value) >= 2 {
-				// Parse as 2-byte integer (little endian)
-				pcesvn = int(ext.Value[len(ext.Value)-1])<<8 | int(ext.Value[len(ext.Value)-2])
+
+		// Check for PCESVN (OID ends with .2.17)
+		if oidStr == "2.17" || strings.HasSuffix(oidStr, ".2.17") {
+			if value.Tag == asn1.TagInteger && len(value.Bytes) >= 1 {
+				// Parse integer (big-endian)
+				pcesvn = 0
+				for _, b := range value.Bytes {
+					pcesvn = (pcesvn << 8) | int(b)
+				}
 				foundPCESVN = true
-				logVerbose("  Extracted PCESVN: %d (0x%04x)", pcesvn, pcesvn)
+				logVerbose("  -> PCESVN found")
 			}
 		}
 	}
 
 	if !foundCPUSVN {
-		return nil, 0, fmt.Errorf("CPUSVN not found in certificate (looked for OID %s)", SGXExtensionsCPUSVN)
+		return nil, 0, fmt.Errorf("CPUSVN not found in SGX extensions")
 	}
 	if !foundPCESVN {
-		return nil, 0, fmt.Errorf("PCESVN not found in certificate (looked for OID %s)", SGXExtensionsPCESVN)
+		return nil, 0, fmt.Errorf("PCESVN not found in SGX extensions")
 	}
 
 	return cpusvn, pcesvn, nil
