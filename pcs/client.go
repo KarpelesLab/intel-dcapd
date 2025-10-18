@@ -12,16 +12,26 @@ import (
 
 // Client is an HTTP client for Intel Provisioning Certificate Service
 type Client struct {
-	apiKey  string
-	baseURL string
-	client  *http.Client
+	apiKey     string
+	baseURL    string
+	pcsVersion string // The version configured in baseURL (3 or 4)
+	client     *http.Client
 }
 
 // NewClient creates a new Intel PCS client
 func NewClient(apiKey, baseURL string) *Client {
+	// Determine PCS version from baseURL
+	pcsVersion := "4"
+	if strings.Contains(baseURL, "/v3/") {
+		pcsVersion = "3"
+	} else if strings.Contains(baseURL, "/v4/") {
+		pcsVersion = "4"
+	}
+
 	return &Client{
-		apiKey:  apiKey,
-		baseURL: strings.TrimSuffix(baseURL, "/"),
+		apiKey:     apiKey,
+		baseURL:    strings.TrimSuffix(baseURL, "/"),
+		pcsVersion: pcsVersion,
 		client: &http.Client{
 			Timeout: 120 * time.Second,
 		},
@@ -116,7 +126,7 @@ func (c *Client) GetPCKCRL(ca string) (*Response, error) {
 }
 
 // GetTCBInfo retrieves TCB information for an FMSPC
-func (c *Client) GetTCBInfo(prodType, fmspc, updateType string) (*Response, error) {
+func (c *Client) GetTCBInfo(prodType, fmspc, requestVersion, updateType string) (*Response, error) {
 	query := url.Values{}
 	query.Set("fmspc", fmspc)
 	if updateType == "early" {
@@ -125,17 +135,29 @@ func (c *Client) GetTCBInfo(prodType, fmspc, updateType string) (*Response, erro
 		query.Set("update", "standard")
 	}
 
-	path := "/tcb"
+	// Start with base URL path
+	path := c.baseURL + "/tcb"
+
+	// Handle TDX vs SGX
 	if prodType == "tdx" {
-		// Replace /sgx/ with /tdx/ in the base URL for TDX requests
 		path = strings.Replace(path, "/sgx/", "/tdx/", 1)
+	}
+
+	// Handle version translation: if PCS is configured for v4 but client requests v3
+	if c.pcsVersion == "4" && requestVersion == "3" {
+		path = strings.Replace(path, "/v4/", "/v3/", 1)
+	}
+
+	// Extract just the path component (remove baseURL prefix)
+	if strings.HasPrefix(path, c.baseURL) {
+		path = strings.TrimPrefix(path, c.baseURL)
 	}
 
 	return c.doRequest("GET", path, query)
 }
 
 // GetEnclaveIdentity retrieves enclave identity (QE, QVE, or TDQE)
-func (c *Client) GetEnclaveIdentity(id, updateType string) (*Response, error) {
+func (c *Client) GetEnclaveIdentity(id, requestVersion, updateType string) (*Response, error) {
 	query := url.Values{}
 	if updateType == "early" {
 		query.Set("update", "early")
@@ -143,16 +165,27 @@ func (c *Client) GetEnclaveIdentity(id, updateType string) (*Response, error) {
 		query.Set("update", "standard")
 	}
 
+	// Start with configured base URL
 	var path string
 	switch id {
 	case "1": // QE
-		path = "/qe/identity"
+		path = c.baseURL + "/qe/identity"
 	case "2": // QVE
-		path = "/qve/identity"
+		path = c.baseURL + "/qve/identity"
 	case "3": // TDQE (TDX)
-		path = "/tdx/qe/identity"
+		path = strings.Replace(c.baseURL, "/sgx/", "/tdx/", 1) + "/qe/identity"
 	default:
 		return nil, fmt.Errorf("invalid enclave identity ID: %s", id)
+	}
+
+	// Handle version translation: if PCS is configured for v4 but client requests v3
+	if c.pcsVersion == "4" && requestVersion == "3" {
+		path = strings.Replace(path, "/v4/", "/v3/", 1)
+	}
+
+	// Extract just the path component (remove baseURL prefix)
+	if strings.HasPrefix(path, c.baseURL) {
+		path = strings.TrimPrefix(path, c.baseURL)
 	}
 
 	return c.doRequest("GET", path, query)
@@ -193,11 +226,11 @@ func (c *Client) GetCRL(crlURL string) (*Response, error) {
 }
 
 // GetTCBInfoForSGX is a convenience method for SGX TCB info
-func (c *Client) GetTCBInfoForSGX(fmspc, updateType string) (*Response, error) {
-	return c.GetTCBInfo("sgx", fmspc, updateType)
+func (c *Client) GetTCBInfoForSGX(fmspc, requestVersion, updateType string) (*Response, error) {
+	return c.GetTCBInfo("sgx", fmspc, requestVersion, updateType)
 }
 
 // GetTCBInfoForTDX is a convenience method for TDX TCB info
-func (c *Client) GetTCBInfoForTDX(fmspc, updateType string) (*Response, error) {
-	return c.GetTCBInfo("tdx", fmspc, updateType)
+func (c *Client) GetTCBInfoForTDX(fmspc, requestVersion, updateType string) (*Response, error) {
+	return c.GetTCBInfo("tdx", fmspc, requestVersion, updateType)
 }

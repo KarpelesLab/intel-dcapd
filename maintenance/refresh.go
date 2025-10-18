@@ -51,18 +51,21 @@ func refreshTCBInfo(db *cache.DB, pcsClient *pcs.Client) {
 
 	for _, fmspc := range fmspcs {
 		// Refresh both standard and early update types for SGX
-		for _, updateType := range []string{cache.UpdateTypeStandard, cache.UpdateTypeEarly} {
-			resp, err := pcsClient.GetTCBInfoForSGX(fmspc, updateType)
-			if err != nil {
-				log.Printf("Failed to refresh TCB info for FMSPC %s (%s): %v", fmspc, updateType, err)
-				continue
-			}
+		// Refresh for both v3 and v4 to maintain compatibility
+		for _, version := range []string{"3", "4"} {
+			for _, updateType := range []string{cache.UpdateTypeStandard, cache.UpdateTypeEarly} {
+				resp, err := pcsClient.GetTCBInfoForSGX(fmspc, version, updateType)
+				if err != nil {
+					log.Printf("Failed to refresh TCB info for FMSPC %s (v%s/%s): %v", fmspc, version, updateType, err)
+					continue
+				}
 
-			if resp.StatusCode == 200 {
-				if err := db.PutTCBInfo(cache.ProdTypeSGX, fmspc, "4", updateType, resp.Body); err != nil {
-					log.Printf("Failed to store TCB info for FMSPC %s (%s): %v", fmspc, updateType, err)
-				} else {
-					log.Printf("Refreshed TCB info for FMSPC %s (%s)", fmspc, updateType)
+				if resp.StatusCode == 200 {
+					if err := db.PutTCBInfo(cache.ProdTypeSGX, fmspc, version, updateType, resp.Body); err != nil {
+						log.Printf("Failed to store TCB info for FMSPC %s (v%s/%s): %v", fmspc, version, updateType, err)
+					} else {
+						log.Printf("Refreshed TCB info for FMSPC %s (v%s/%s)", fmspc, version, updateType)
+					}
 				}
 			}
 		}
@@ -76,19 +79,22 @@ func refreshIdentities(db *cache.DB, pcsClient *pcs.Client) {
 	identities := []string{cache.IdentityQE, cache.IdentityQVE, cache.IdentityTDQE}
 	updateTypes := []string{cache.UpdateTypeStandard, cache.UpdateTypeEarly}
 
-	for _, id := range identities {
-		for _, updateType := range updateTypes {
-			resp, err := pcsClient.GetEnclaveIdentity(id, updateType)
-			if err != nil {
-				log.Printf("Failed to refresh identity %s (%s): %v", id, updateType, err)
-				continue
-			}
+	// Refresh for both v3 and v4 to maintain compatibility
+	for _, version := range []string{"3", "4"} {
+		for _, id := range identities {
+			for _, updateType := range updateTypes {
+				resp, err := pcsClient.GetEnclaveIdentity(id, version, updateType)
+				if err != nil {
+					log.Printf("Failed to refresh identity %s (v%s/%s): %v", id, version, updateType, err)
+					continue
+				}
 
-			if resp.StatusCode == 200 {
-				if err := db.PutIdentity(id, "4", updateType, resp.Body); err != nil {
-					log.Printf("Failed to store identity %s (%s): %v", id, updateType, err)
-				} else {
-					log.Printf("Refreshed identity %s (%s)", id, updateType)
+				if resp.StatusCode == 200 {
+					if err := db.PutIdentity(id, version, updateType, resp.Body); err != nil {
+						log.Printf("Failed to store identity %s (v%s/%s): %v", id, version, updateType, err)
+					} else {
+						log.Printf("Refreshed identity %s (v%s/%s)", id, version, updateType)
+					}
 				}
 			}
 		}

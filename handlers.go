@@ -12,6 +12,17 @@ import (
 	"github.com/KarpelesLab/intel-dcapd/pckcertselect"
 )
 
+// extractAPIVersion extracts the API version from the request path
+func extractAPIVersion(path string) string {
+	if strings.Contains(path, "/v4/") {
+		return "4"
+	}
+	if strings.Contains(path, "/v3/") {
+		return "3"
+	}
+	return "4" // default
+}
+
 // setupHandlers configures all HTTP routes
 func setupHandlers(db *cache.DB, pcsClient *pcs.Client, cacheMode string) http.Handler {
 	mux := http.NewServeMux()
@@ -273,6 +284,7 @@ func handleTCB(db *cache.DB, pcsClient *pcs.Client, prodType string) http.Handle
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmspc := strings.ToUpper(r.URL.Query().Get("fmspc"))
 		update := strings.ToLower(r.URL.Query().Get("update"))
+		version := extractAPIVersion(r.URL.Path)
 
 		if fmspc == "" {
 			http.Error(w, "Missing fmspc parameter", http.StatusBadRequest)
@@ -284,7 +296,7 @@ func handleTCB(db *cache.DB, pcsClient *pcs.Client, prodType string) http.Handle
 		}
 
 		// Try cache first
-		tcbInfo, err := db.GetTCBInfo(prodType, fmspc, "4", update)
+		tcbInfo, err := db.GetTCBInfo(prodType, fmspc, version, update)
 		if err == nil && tcbInfo != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -295,9 +307,9 @@ func handleTCB(db *cache.DB, pcsClient *pcs.Client, prodType string) http.Handle
 		// Cache miss - fetch from PCS
 		var resp *pcs.Response
 		if prodType == "tdx" {
-			resp, err = pcsClient.GetTCBInfoForTDX(fmspc, update)
+			resp, err = pcsClient.GetTCBInfoForTDX(fmspc, version, update)
 		} else {
-			resp, err = pcsClient.GetTCBInfoForSGX(fmspc, update)
+			resp, err = pcsClient.GetTCBInfoForSGX(fmspc, version, update)
 		}
 
 		if err != nil {
@@ -312,7 +324,7 @@ func handleTCB(db *cache.DB, pcsClient *pcs.Client, prodType string) http.Handle
 		}
 
 		// Cache the result
-		db.PutTCBInfo(prodType, fmspc, "4", update, resp.Body)
+		db.PutTCBInfo(prodType, fmspc, version, update, resp.Body)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -324,12 +336,14 @@ func handleTCB(db *cache.DB, pcsClient *pcs.Client, prodType string) http.Handle
 func handleIdentity(db *cache.DB, pcsClient *pcs.Client, identityID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		update := strings.ToLower(r.URL.Query().Get("update"))
+		version := extractAPIVersion(r.URL.Path)
+
 		if update == "" {
 			update = cache.UpdateTypeStandard
 		}
 
 		// Try cache first
-		identity, err := db.GetIdentity(identityID, "4", update)
+		identity, err := db.GetIdentity(identityID, version, update)
 		if err == nil && identity != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -338,7 +352,7 @@ func handleIdentity(db *cache.DB, pcsClient *pcs.Client, identityID string) http
 		}
 
 		// Cache miss - fetch from PCS
-		resp, err := pcsClient.GetEnclaveIdentity(identityID, update)
+		resp, err := pcsClient.GetEnclaveIdentity(identityID, version, update)
 		if err != nil {
 			log.Printf("Failed to fetch enclave identity: %v", err)
 			http.Error(w, "Failed to fetch identity", http.StatusNotFound)
@@ -351,7 +365,7 @@ func handleIdentity(db *cache.DB, pcsClient *pcs.Client, identityID string) http
 		}
 
 		// Cache the result
-		db.PutIdentity(identityID, "4", update, resp.Body)
+		db.PutIdentity(identityID, version, update, resp.Body)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
