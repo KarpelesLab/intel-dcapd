@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"strconv"
-	"strings"
 )
 
 // Global verbose flag for this package
@@ -297,8 +296,8 @@ func parseSGXExtensions(extValue []byte) ([]byte, int, error) {
 		oidStr := oid.String()
 		logVerbose("  Found nested OID: %s (tag=%d, len=%d)", oidStr, value.Tag, len(value.Bytes))
 
-		// Check for TCB extension (OID ends with .2) - it contains CPUSVN and PCESVN
-		if strings.HasSuffix(oidStr, ".2") && value.Tag == asn1.TagSequence {
+		// Check for TCB extension - exact OID match only
+		if oidStr == SGXExtensionsTCB && value.Tag == asn1.TagSequence {
 			logVerbose("  -> Found TCB sequence, parsing nested contents...")
 			cpusvnFound, pcesvnFound, err := parseTCBSequence(value.Bytes)
 			if err == nil {
@@ -361,18 +360,20 @@ func parseTCBSequence(tcbBytes []byte) ([]byte, int, error) {
 		oidStr := oid.String()
 		logVerbose("    Found TCB component OID: %s (tag=%d, len=%d)", oidStr, value.Tag, len(value.Bytes))
 
-		// Check for CPUSVN (OID .18 or ends with .2.18)
-		if oidStr == "18" || strings.HasSuffix(oidStr, ".18") {
+		// Check for CPUSVN - exact OID match only
+		if oidStr == SGXExtensionsCPUSVN {
 			if value.Tag == asn1.TagOctetString && len(value.Bytes) >= 16 {
 				cpusvn = make([]byte, 16)
 				copy(cpusvn, value.Bytes[:16])
 				foundCPUSVN = true
 				logVerbose("    -> CPUSVN found: %x", cpusvn)
+			} else {
+				logVerbose("    -> CPUSVN OID matched but wrong tag/length: tag=%d len=%d", value.Tag, len(value.Bytes))
 			}
 		}
 
-		// Check for PCESVN (OID .17 or ends with .2.17)
-		if oidStr == "17" || strings.HasSuffix(oidStr, ".17") {
+		// Check for PCESVN - exact OID match only
+		if oidStr == SGXExtensionsPCESVN {
 			if value.Tag == asn1.TagInteger && len(value.Bytes) >= 1 {
 				// Parse integer (big-endian)
 				pcesvn = 0
@@ -381,6 +382,8 @@ func parseTCBSequence(tcbBytes []byte) ([]byte, int, error) {
 				}
 				foundPCESVN = true
 				logVerbose("    -> PCESVN found: %d (0x%04x)", pcesvn, pcesvn)
+			} else {
+				logVerbose("    -> PCESVN OID matched but wrong tag/length: tag=%d len=%d", value.Tag, len(value.Bytes))
 			}
 		}
 	}
