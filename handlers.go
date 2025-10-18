@@ -212,11 +212,26 @@ func fetchAndCachePlatform(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, enc
 		return fmt.Errorf("missing required headers from PCS")
 	}
 
-	// Parse response to extract individual certificates
-	// The response contains TCB info embedded in the JSON
-	var certsData map[string]interface{}
-	if err := json.Unmarshal(resp.Body, &certsData); err != nil {
+	// Parse response - Intel PCS returns a JSON array of cert objects
+	// Each object has "tcbm" and "cert" fields
+	var certsArray []struct {
+		TCBM string `json:"tcbm"`
+		Cert string `json:"cert"`
+	}
+	if err := json.Unmarshal(resp.Body, &certsArray); err != nil {
 		return err
+	}
+
+	// Filter out "Not available" certificates
+	validCerts := 0
+	for _, certData := range certsArray {
+		if certData.Cert != "Not available" {
+			validCerts++
+		}
+	}
+
+	if validCerts == 0 {
+		return fmt.Errorf("no valid certificates in PCS response")
 	}
 
 	// Store platform
@@ -233,27 +248,21 @@ func fetchAndCachePlatform(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, enc
 
 	// Store certificate chain
 	if issuerChain != "" {
-		// Parse and store cert chain (simplified)
 		certChain := &cache.CertChain{
 			CA:        strings.ToLower(caType),
-			RootCert:  issuerChain, // In reality, need to parse this
+			RootCert:  issuerChain,
 			IntmdCert: "",
 		}
 		db.PutCertChain(strings.ToLower(caType), certChain)
 	}
 
 	// Store individual certificates from the response
-	// This is simplified - actual implementation needs to parse the certs array
-	if certs, ok := certsData["certs"].([]interface{}); ok {
-		for _, certData := range certs {
-			if certMap, ok := certData.(map[string]interface{}); ok {
-				if tcbm, ok := certMap["tcbm"].(string); ok {
-					if cert, ok := certMap["cert"].(string); ok {
-						db.PutCert(qeID, pceID, tcbm, []byte(cert))
-					}
-				}
-			}
+	for _, certData := range certsArray {
+		// Skip "Not available" certificates
+		if certData.Cert == "Not available" {
+			continue
 		}
+		db.PutCert(qeID, pceID, certData.TCBM, []byte(certData.Cert))
 	}
 
 	return nil
