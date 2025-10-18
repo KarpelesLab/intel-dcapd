@@ -252,16 +252,11 @@ func fetchAndCachePlatform(db *cache.DB, pcsClient *pcs.Client, qeID, pceID, enc
 		return err
 	}
 
-	// Store certificate chain (URL-decode it first)
+	// Store certificate chain (keep it URL-encoded, like Intel's implementation)
 	if issuerChain != "" {
-		decodedChain, err := url.QueryUnescape(issuerChain)
-		if err != nil {
-			log.Printf("Failed to decode issuer chain: %v", err)
-			decodedChain = issuerChain // Use as-is if decode fails
-		}
 		certChain := &cache.CertChain{
 			CA:        strings.ToLower(caType),
-			RootCert:  decodedChain,
+			RootCert:  issuerChain, // Store URL-encoded
 			IntmdCert: "",
 		}
 		db.PutCertChain(strings.ToLower(caType), certChain)
@@ -301,9 +296,8 @@ func writePCKCertResponse(w http.ResponseWriter, cert []byte, tcbm string, platf
 	w.Header().Set("SGX-FMSPC", platform.FMSPC)
 	w.Header().Set("SGX-PCK-Certificate-CA-Type", platform.CA)
 	if issuerChain != "" {
-		// URL-encode the certificate chain for the HTTP header
-		encodedChain := url.QueryEscape(issuerChain)
-		w.Header().Set("SGX-PCK-Certificate-Issuer-Chain", encodedChain)
+		// Issuer chain is already URL-encoded in storage (matching Intel's implementation)
+		w.Header().Set("SGX-PCK-Certificate-Issuer-Chain", issuerChain)
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(cert)
