@@ -81,54 +81,124 @@ All configuration is via environment variables:
 
 ## Caching Modes
 
-### LAZY Mode (Default)
+### LAZY Mode (Default) ✅
 
 Cache-on-demand: fetches from Intel PCS when data is not in cache.
 
 - Requires internet access at runtime
 - Best for development and testing
 - Automatic cache population
+- **Fully supported**
 
-### REQ Mode
+### REQ Mode ✅
 
 Pre-caches platform data during registration.
 
-- Fetches all collaterals when platform is registered
-- Runtime uses cache only (no Intel PCS access)
+- Fetches all collaterals when platform is registered via POST /platforms
+- Runtime uses cache only (no Intel PCS access needed)
 - Good for production with initial internet access
+- **Fully supported**
 
-### OFFLINE Mode
+### OFFLINE Mode ⚠️
 
 No internet access required at runtime.
 
-- Platforms are queued during registration
-- Admin tool fetches collaterals separately
-- Good for air-gapped environments
+- **Partially supported**
+- Platform registration via POST /platforms works (fetches and caches)
+- Manual collateral upload via PUT /platformcollateral is **NOT IMPLEMENTED**
+- For true air-gapped environments, use Intel's original Node.js PCCS
+- For most use cases, REQ mode is a better alternative
+
+## Feature Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| PCK Certificate caching | ✅ Fully supported | GET /pckcert |
+| TCB Info (SGX & TDX) | ✅ Fully supported | Both v3 and v4 APIs |
+| Enclave identities | ✅ Fully supported | QE, QVE, TDQE |
+| CRL caching | ✅ Fully supported | PCK, Root CA, generic |
+| Platform registration | ✅ Fully supported | POST /platforms |
+| Platform listing | ✅ Fully supported | GET /platforms |
+| Manual cache refresh | ✅ Fully supported | GET/POST /refresh |
+| Appraisal policies | ✅ Fully supported | PUT/GET /appraisalpolicy |
+| Platform collateral upload | ❌ Not implemented | PUT /platformcollateral (OFFLINE mode) |
+| Background cache refresh | ✅ Fully supported | Automatic daily refresh |
+| v3 API compatibility | ✅ Fully supported | All endpoints support v3 |
+| v4 API | ✅ Fully supported | Primary API version |
 
 ## API Endpoints
 
-The service implements the Intel PCS API:
+The service implements the Intel PCCS API with full v3 and v4 support:
 
-### SGX Certification v3 & v4
+### Certificate Endpoints (Public)
 
 ```
 GET  /sgx/certification/v4/pckcert              # Get PCK certificate
-GET  /sgx/certification/v4/tcb                  # Get TCB info
+GET  /sgx/certification/v4/tcb                  # Get SGX TCB info
 GET  /sgx/certification/v4/qe/identity          # Get QE identity
 GET  /sgx/certification/v4/qve/identity         # Get QVE identity
 GET  /sgx/certification/v4/pckcrl               # Get PCK CRL
 GET  /sgx/certification/v4/rootcacrl            # Get root CA CRL
-GET  /sgx/certification/v4/crl                  # Get generic CRL
-POST /sgx/certification/v4/platforms            # Register platforms
-GET  /sgx/certification/v4/platforms            # Get registered platforms
+GET  /sgx/certification/v4/crl                  # Get CRL from URL
+GET  /sgx/certification/v4/appraisalpolicy      # Get appraisal policy
 ```
 
-### TDX Certification v4
+### Platform Management (Authenticated)
+
+```
+POST /sgx/certification/v4/platforms            # Register platforms (user auth)
+GET  /sgx/certification/v4/platforms            # List platforms (admin auth)
+```
+
+### Admin Endpoints (Authenticated)
+
+```
+GET  /sgx/certification/v4/refresh              # Trigger cache refresh
+POST /sgx/certification/v4/refresh              # Trigger cache refresh
+PUT  /sgx/certification/v4/appraisalpolicy      # Upload appraisal policy
+PUT  /sgx/certification/v4/platformcollateral   # Not implemented (returns 501)
+```
+
+### TDX Endpoints (Public)
 
 ```
 GET  /tdx/certification/v4/tcb                  # Get TDX TCB info
 GET  /tdx/certification/v4/qe/identity          # Get TD QE identity
 ```
+
+**Note:** All endpoints above are also available with `/v3/` for backward compatibility.
+
+## Differences from Intel's Node.js PCCS
+
+This Go implementation achieves API compatibility with Intel's reference PCCS but differs in some areas:
+
+### Not Implemented
+- **PUT /platformcollateral** - Bulk collateral upload for OFFLINE mode returns HTTP 501
+  - This endpoint has a complex schema for uploading TCB info, certificates, CRLs, and identities
+  - For air-gapped deployments requiring this feature, use Intel's original Node.js PCCS
+  - For most use cases, platform registration via POST /platforms is sufficient
+
+### Implementation Differences
+- **Database:** Uses PebbleDB (embedded key-value store) instead of SQLite/MySQL
+  - No schema migrations needed
+  - Simpler deployment
+  - Cannot migrate existing PCCS database (cache repopulates automatically)
+
+- **Platform Registration:** POST /platforms in LAZY/REQ modes fetches certificates immediately
+  - Simpler than Intel's queuing mechanism
+  - No separate platform registration states ("NEW", "NOT_AVAILABLE")
+  - Platforms are either cached or not cached
+
+- **Certificate Selection:** Pure Go implementation of PCK certificate selection algorithm
+  - Based on Intel's reference but independently implemented
+  - Matches PCK cert to platform TCB level
+
+### Fully Compatible
+- All certificate retrieval endpoints (GET /pckcert, /tcb, /qe/identity, etc.)
+- Both v3 and v4 API versions
+- Authentication model (user/admin tokens)
+- Cache refresh mechanism
+- Appraisal policy storage and retrieval
 
 ## Building from Source
 
