@@ -62,8 +62,27 @@ type TCBInfo struct {
 	} `json:"tcbInfo"`
 }
 
+// comparisonResult represents the result of comparing two TCB values
+type comparisonResult int
+
+const (
+	compError          comparisonResult = iota // Error in comparison
+	compLower                                   // Left < Right
+	compEqualOrGreater                          // Left >= Right (all components)
+	compUndefined                               // Incomparable (some higher, some lower)
+)
+
+// certWithTCB holds a certificate index and its extracted TCB
+type certWithTCB struct {
+	index   int
+	cpusvn  []byte
+	pcesvn  int
+	certPEM string
+}
+
 // SelectCertificate selects the best matching PCK certificate based on TCB levels
 // Returns the index of the selected certificate, or -1 if no match found
+// Algorithm matches Intel's PCKCertSelection library
 func SelectCertificate(certs []string, cpuSVN, pceSVN, pceID string, tcbInfoJSON []byte) (int, error) {
 	if len(certs) == 0 {
 		return -1, fmt.Errorf("no certificates provided")
@@ -91,42 +110,74 @@ func SelectCertificate(certs []string, cpuSVN, pceSVN, pceID string, tcbInfoJSON
 		return -1, fmt.Errorf("invalid PCESVN: %w", err)
 	}
 
-	// Extract TCB components from each certificate and find best match
-	bestIdx := -1
-	bestScore := -1
-
+	// Extract TCB from all certificates
+	var certsWithTCB []certWithTCB
 	for i, certPEM := range certs {
-		// Parse certificate
 		block, _ := pem.Decode([]byte(certPEM))
 		if block == nil {
+			logVerbose("Certificate %d: failed to decode PEM", i)
 			continue
 		}
 
 		cert, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
+			logVerbose("Certificate %d: failed to parse x509: %v", i, err)
 			continue
 		}
 
-		// Extract TCB from certificate extensions
-		// SGX PCK certificates have TCB info in extensions
 		certCPUSVN, certPCESVN, err := extractTCBFromCert(cert)
 		if err != nil {
+			logVerbose("Certificate %d: failed to extract TCB: %v", i, err)
 			continue
 		}
 
-		// Check if this cert's TCB matches or is greater than target
-		score := compareTCB(targetCPUSVN, int(targetPCESVN), certCPUSVN, certPCESVN, &tcbInfo)
-		if score > bestScore {
-			bestScore = score
-			bestIdx = i
+		certsWithTCB = append(certsWithTCB, certWithTCB{
+			index:   i,
+			cpusvn:  certCPUSVN,
+			pcesvn:  certPCESVN,
+			certPEM: certPEM,
+		})
+		logVerbose("Certificate %d: CPUSVN=%x PCESVN=%d", i, certCPUSVN, certPCESVN)
+	}
+
+	if len(certsWithTCB) == 0 {
+		return -1, fmt.Errorf("no valid certificates with TCB extensions")
+	}
+
+	// Sort certificates by TCB (highest first)
+	// This matches Intel's bucketing approach
+	sortCertsByTCB(certsWithTCB)
+
+	// Find first certificate where platform_tcb >= cert_tcb
+	// This gives us the highest valid certificate
+	logVerbose("Platform TCB: CPUSVN=%x PCESVN=%d", targetCPUSVN, targetPCESVN)
+	for i, certTCB := range certsWithTCB {
+		result := compareTCBComponents(targetCPUSVN, int(targetPCESVN), certTCB.cpusvn, certTCB.pcesvn)
+		logVerbose("Comparing platform to cert %d (orig index %d): %s", i, certTCB.index, compResultString(result))
+
+		if result == compEqualOrGreater {
+			logVerbose("Selected certificate at original index %d", certTCB.index)
+			return certTCB.index, nil
 		}
 	}
 
-	if bestIdx == -1 {
-		return -1, fmt.Errorf("no matching certificate found")
-	}
+	return -1, fmt.Errorf("platform TCB is lower than all available certificates")
+}
 
-	return bestIdx, nil
+// compResultString returns a string representation of comparison result
+func compResultString(r comparisonResult) string {
+	switch r {
+	case compError:
+		return "ERROR"
+	case compLower:
+		return "LOWER"
+	case compEqualOrGreater:
+		return "EQUAL_OR_GREATER"
+	case compUndefined:
+		return "UNDEFINED"
+	default:
+		return "UNKNOWN"
+	}
 }
 
 // SGX extension OID constants
@@ -280,36 +331,57 @@ func parseSGXExtensions(extValue []byte) ([]byte, int, error) {
 	return cpusvn, pcesvn, nil
 }
 
-// compareTCB compares target TCB with certificate TCB and returns a match score
-// Higher score = better match
-// Returns -1 if cert TCB is lower than target (not acceptable)
-func compareTCB(targetCPUSVN []byte, targetPCESVN int, certCPUSVN []byte, certPCESVN int, tcbInfo *TCBInfo) int {
-	// Check PCESVN first
-	if certPCESVN < targetPCESVN {
-		return -1 // Certificate PCESVN is too low
+// compareTCBComponents compares two TCB values using Intel's algorithm
+// Matches the logic from PCKCertSelection library's compare_tcb_components
+func compareTCBComponents(leftCPUSVN []byte, leftPCESVN int, rightCPUSVN []byte, rightPCESVN int) comparisonResult {
+	if len(leftCPUSVN) != 16 || len(rightCPUSVN) != 16 {
+		return compError
 	}
 
-	// Check each CPUSVN component
-	for i := 0; i < 16 && i < len(targetCPUSVN) && i < len(certCPUSVN); i++ {
-		if certCPUSVN[i] < targetCPUSVN[i] {
-			return -1 // Certificate CPUSVN component is too low
+	leftLower := false
+	rightLower := false
+
+	// Compare PCESVNs
+	if leftPCESVN < rightPCESVN {
+		leftLower = true
+	}
+	if leftPCESVN > rightPCESVN {
+		rightLower = true
+	}
+
+	// Compare components byte by byte
+	for i := 0; i < 16; i++ {
+		if leftCPUSVN[i] < rightCPUSVN[i] {
+			leftLower = true
+		}
+		if leftCPUSVN[i] > rightCPUSVN[i] {
+			rightLower = true
 		}
 	}
 
-	// Calculate match score (prefer exact matches)
-	score := 0
-
-	// Exact PCESVN match is better
-	if certPCESVN == targetPCESVN {
-		score += 100
+	// Determine result based on flags
+	if leftLower && rightLower {
+		return compUndefined // Some components higher, some lower
 	}
+	if leftLower {
+		return compLower // Left is strictly lower
+	}
+	return compEqualOrGreater // Left >= Right in all components
+}
 
-	// Count exact CPUSVN component matches
-	for i := 0; i < 16 && i < len(targetCPUSVN) && i < len(certCPUSVN); i++ {
-		if certCPUSVN[i] == targetCPUSVN[i] {
-			score += 10
+// sortCertsByTCB sorts certificates by TCB in descending order (highest first)
+// This matches Intel's bucketing approach
+func sortCertsByTCB(certs []certWithTCB) {
+	// Simple bubble sort since certificate count is typically small (< 20)
+	// Could use sort.Slice but this is clearer and matches Intel's approach
+	for i := 0; i < len(certs); i++ {
+		for j := i + 1; j < len(certs); j++ {
+			// Compare certs[i] with certs[j]
+			result := compareTCBComponents(certs[i].cpusvn, certs[i].pcesvn, certs[j].cpusvn, certs[j].pcesvn)
+			// If certs[i] is lower than certs[j], swap them (we want highest first)
+			if result == compLower {
+				certs[i], certs[j] = certs[j], certs[i]
+			}
 		}
 	}
-
-	return score
 }
