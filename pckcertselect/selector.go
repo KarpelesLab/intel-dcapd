@@ -114,32 +114,34 @@ func SelectCertificate(certs []string, cpuSVN, pceSVN, pceID string, tcbInfoJSON
 // extractTCBFromCert extracts TCB components from a PCK certificate
 func extractTCBFromCert(cert *x509.Certificate) ([]byte, int, error) {
 	// SGX PCK certificates have TCB in extensions
-	// OID 1.2.840.113741.1.13.1 contains CPUSVN (16 bytes)
-	// OID 1.2.840.113741.1.13.1.2 contains PCESVN (2 bytes)
+	// OID 1.2.840.113741.1.13.1.2.18 contains CPUSVN (16 bytes)
+	// OID 1.2.840.113741.1.13.1.2.17 contains PCESVN (2 bytes)
 
 	var cpusvn []byte
 	var pcesvn int
 
 	for _, ext := range cert.Extensions {
-		// CPUSVN extension
-		if ext.Id.String() == "1.2.840.113741.1.13.1.2" {
-			// First 2 bytes after ASN.1 header are the extension data
-			if len(ext.Value) >= 18 {
-				// Skip ASN.1 SEQUENCE and OCTET STRING headers
+		oidStr := ext.Id.String()
+
+		// CPUSVN extension (OID .2.18)
+		if oidStr == "1.2.840.113741.1.13.1.2.18" {
+			// CPUSVN is 16 bytes
+			if len(ext.Value) >= 16 {
+				// Last 16 bytes are the CPUSVN value
 				cpusvn = ext.Value[len(ext.Value)-16:]
 			}
 		}
-		// PCESVN extension
-		if ext.Id.String() == "1.2.840.113741.1.13.1.3" {
-			if len(ext.Value) >= 4 {
-				// Parse as integer (big endian)
-				pcesvn = int(ext.Value[len(ext.Value)-2])<<8 | int(ext.Value[len(ext.Value)-1])
+		// PCESVN extension (OID .2.17)
+		if oidStr == "1.2.840.113741.1.13.1.2.17" {
+			if len(ext.Value) >= 2 {
+				// Parse as 2-byte integer (little endian based on Intel spec)
+				pcesvn = int(ext.Value[len(ext.Value)-1])<<8 | int(ext.Value[len(ext.Value)-2])
 			}
 		}
 	}
 
 	if cpusvn == nil {
-		return nil, 0, fmt.Errorf("CPUSVN not found in certificate")
+		return nil, 0, fmt.Errorf("CPUSVN not found in certificate (OID 1.2.840.113741.1.13.1.2.18)")
 	}
 
 	return cpusvn, pcesvn, nil
