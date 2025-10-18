@@ -698,10 +698,75 @@ func handleGetPlatforms(db *cache.DB) http.HandlerFunc {
 
 func handlePlatformCollateral(db *cache.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Platform collateral upload for OFFLINE mode
-		// This is a complex endpoint that accepts TCB info, certs, CRLs, etc.
-		// For now, return a not implemented status
-		http.Error(w, "Platform collateral upload not yet implemented", http.StatusNotImplemented)
+		// Parse JSON payload
+		var payload PlatformCollateral
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Extract API version from request
+		version := 4 // default to v4
+		apiVer := extractAPIVersion(r.URL.Path)
+		if apiVer == "3" {
+			version = 3
+		}
+
+		log.Printf("Received platform collateral upload (v%d): %d platforms, %d PCK cert sets, %d TCB infos",
+			version, len(payload.Platforms), len(payload.Collaterals.PCKCerts), len(payload.Collaterals.TCBInfos))
+
+		// Create a batch for atomic operations
+		batch := db.NewBatch()
+		defer batch.Close()
+
+		// Process all collateral types in the same order as Intel's implementation
+
+		// 1. Process PCK certificates (includes platform_tcb computation and platform updates)
+		if err := processPckCerts(db, batch, payload.Platforms, payload.Collaterals.PCKCerts, payload.Collaterals.TCBInfos, version); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to process PCK certificates: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// 2. Process TCB infos
+		if err := processTcbInfo(batch, payload.Collaterals.TCBInfos, version); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to process TCB info: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// 3. Process PCK CRLs
+		if err := processCRLs(batch, payload.Collaterals.PCKCaCrl, payload.Collaterals.RootCaCrl, payload.Collaterals.RootCaCrlCdp); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to process CRLs: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// 4. Process enclave identities
+		if err := processIdentities(batch, &payload.Collaterals); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to process identities: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// 5. Process certificate chains and validate
+		rootCerts, err := processCertificates(batch, payload.Collaterals.Certificates)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to process certificates: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// 6. Verify certificate chain integrity
+		if !verifyCertChain(rootCerts) {
+			http.Error(w, "Certificate chain validation failed: root certificates don't match", http.StatusBadRequest)
+			return
+		}
+
+		// Commit the batch atomically
+		if err := batch.Commit(nil); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to commit batch: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("Successfully uploaded platform collateral: %d platforms processed", len(payload.Platforms))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Platform collateral uploaded successfully"))
 	}
 }
 

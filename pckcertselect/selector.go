@@ -241,6 +241,84 @@ func extractTCBFromCert(cert *x509.Certificate) ([]byte, int, error) {
 	return cpusvn, pcesvn, nil
 }
 
+// ParseSGXExtensions parses the SGX extension to extract FMSPC and CA (processor vs platform)
+// This is a public version for use by other packages
+func ParseSGXExtensions(extValue []byte) (fmspc []byte, ca string, err error) {
+	var seq asn1.RawValue
+	rest, err := asn1.Unmarshal(extValue, &seq)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to unmarshal base sequence: %w", err)
+	}
+	if len(rest) > 0 {
+		logVerbose("Warning: %d bytes remaining after base sequence", len(rest))
+	}
+
+	if seq.Class != asn1.ClassUniversal || seq.Tag != asn1.TagSequence {
+		return nil, "", fmt.Errorf("expected SEQUENCE, got class=%d tag=%d", seq.Class, seq.Tag)
+	}
+
+	// Parse nested elements
+	seqBytes := seq.Bytes
+	for len(seqBytes) > 0 {
+		var elem asn1.RawValue
+		var err error
+		seqBytes, err = asn1.Unmarshal(seqBytes, &elem)
+		if err != nil {
+			break
+		}
+
+		if elem.Class != asn1.ClassUniversal || elem.Tag != asn1.TagSequence {
+			continue
+		}
+
+		// Each element is [OID, value]
+		var oid asn1.ObjectIdentifier
+		var value asn1.RawValue
+		elemBytes := elem.Bytes
+
+		elemBytes, err = asn1.Unmarshal(elemBytes, &oid)
+		if err != nil {
+			continue
+		}
+
+		_, err = asn1.Unmarshal(elemBytes, &value)
+		if err != nil {
+			continue
+		}
+
+		oidStr := oid.String()
+
+		// Extract FMSPC (OID 1.2.840.113741.1.13.1.4)
+		if oidStr == SGXExtensionsFMSPC {
+			if value.Tag == asn1.TagOctetString {
+				fmspc = value.Bytes
+			}
+		}
+
+		// Extract SGX Type (OID 1.2.840.113741.1.13.1.5)
+		// 0 = processor, 1 = platform
+		if oidStr == SGXExtensionsSGXType {
+			if value.Tag == asn1.TagEnum && len(value.Bytes) > 0 {
+				sgxType := int(value.Bytes[0])
+				if sgxType == 0 {
+					ca = "processor"
+				} else if sgxType == 1 {
+					ca = "platform"
+				}
+			}
+		}
+	}
+
+	if len(fmspc) == 0 {
+		return nil, "", fmt.Errorf("FMSPC not found in SGX extensions")
+	}
+	if ca == "" {
+		return nil, "", fmt.Errorf("SGX Type not found in SGX extensions")
+	}
+
+	return fmspc, ca, nil
+}
+
 // parseSGXExtensions parses the nested ASN.1 structure inside the base SGX extension
 func parseSGXExtensions(extValue []byte) ([]byte, int, error) {
 	// The structure is a SEQUENCE containing nested elements

@@ -34,6 +34,20 @@ func (d *DB) Close() error {
 	return d.db.Close()
 }
 
+// NewBatch creates a new batch for atomic operations
+func (d *DB) NewBatch() *pebble.Batch {
+	return d.db.NewBatch()
+}
+
+// NewIter creates a new iterator with the given options
+func (d *DB) NewIter(opts *pebble.IterOptions) (*pebble.Iterator, error) {
+	iter, err := d.db.NewIter(opts)
+	if err != nil {
+		return nil, err
+	}
+	return iter, nil
+}
+
 // Key prefixes for different data types
 const (
 	prefixPlatform    = "platform:"
