@@ -16,6 +16,7 @@ The original Node.js-based PCCS (`sgx-dcap-pccs`) has become difficult to instal
 - Complex dependency chains
 - Heavy runtime requirements (Node.js, native modules, etc.)
 - apt install requires interactions
+- [sgx-dcap-pccs installation fails with npm audit error](https://github.com/intel/SGXDataCenterAttestationPrimitives/issues/467)
 
 This Go implementation:
 - **Single binary** - no dependencies, just run it
